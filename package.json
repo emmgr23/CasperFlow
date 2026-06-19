@@ -1,0 +1,30 @@
+{
+  "name": "casperflow",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc -b && vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@casper-ecosystem/casper-eip-712": "^1.2.0",
+    "@make-software/cspr-trade-mcp-sdk": "^0.6.0",
+    "@noble/curves": "^1.9.0",
+    "@noble/hashes": "^1.8.0",
+    "@scure/bip39": "^1.6.0",
+    "@xyflow/react": "^12.3.0",
+    "buffer": "^6.0.3",
+    "casper-js-sdk": "^5.0.0",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^6.0.3"
+  }
+}

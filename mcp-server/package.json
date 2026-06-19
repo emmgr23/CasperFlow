@@ -1,0 +1,37 @@
+{
+  "name": "casperflow-mcp",
+  "version": "0.1.0",
+  "description": "MCP server exposing CasperFlow's real Casper Network actions (balance, send, delegate, attest, CSPR.name) to any MCP client.",
+  "keywords": ["mcp", "model-context-protocol", "casper", "blockchain", "ai-agent", "casperflow", "web3"],
+  "license": "MIT",
+  "type": "module",
+  "bin": {
+    "casperflow-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "tsx src/index.ts",
+    "prepublishOnly": "npm run build"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0",
+    "@noble/hashes": "^1.4.0",
+    "casper-js-sdk": "^5.0.12",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.19.0",
+    "typescript": "^5.5.0"
+  }
+}

@@ -1,0 +1,103 @@
+1
+00:00:01,500 --> 00:00:05,000
+CasperFlow. Build autonomous AI agents on the Casper blockchain. No code.
+
+2
+00:00:05,300 --> 00:00:09,500
+A built-in wiki documents every action and on-chain capability.
+
+3
+00:00:11,000 --> 00:00:16,000
+Organize your agents in separate workspaces,
+
+4
+00:00:18,000 --> 00:00:25,000
+and drag a workspace into the bar to pin it.
+
+5
+00:00:28,000 --> 00:00:32,000
+Build from a palette of blocks. First, triggers,
+
+6
+00:00:33,000 --> 00:00:39,000
+then Logic, including a Wallet that holds a real Casper key.
+
+7
+00:00:40,000 --> 00:00:43,000
+Choose which wallet signs. Here, Wallet 3.
+
+8
+00:00:44,000 --> 00:00:48,500
+Each wallet shows its real on-chain transaction history.
+
+9
+00:00:50,000 --> 00:00:57,500
+Connect actions like building blocks, data flows to the next step.
+
+10
+00:01:00,000 --> 00:01:06,500
+Casper Actions: send CSPR, stake, call contracts, anchor attestations,
+
+11
+00:01:07,500 --> 00:01:11,000
+real-world-asset actions,
+
+12
+00:01:11,500 --> 00:01:14,500
+and outputs like Telegram or Discord.
+
+13
+00:01:16,000 --> 00:01:21,000
+Or skip the dragging, just describe your agent in plain English.
+
+14
+00:01:22,000 --> 00:01:29,000
+A Treasury Guardian: read balance, decide with AI, pay, anchor the proof on-chain.
+
+15
+00:01:30,000 --> 00:01:35,000
+One click, the AI builds the entire flow.
+
+16
+00:01:35,500 --> 00:01:39,000
+Your agent is ready.
+
+17
+00:01:40,000 --> 00:01:44,000
+Running live on Casper testnet. Real, not simulated.
+
+18
+00:01:44,200 --> 00:01:48,000
+It reads the balance, the AI approves, then signs a REAL CSPR transfer.
+
+19
+00:01:48,500 --> 00:01:52,000
+A second AI summarizes, and the verdict is anchored on Casper (EIP-712).
+
+20
+00:01:53,000 --> 00:01:58,500
+Every transaction is verifiable on the public Casper explorer.
+
+21
+00:01:59,500 --> 00:02:04,500
+The payment, confirmed on-chain. Status: Success.
+
+22
+00:02:05,500 --> 00:02:10,500
+The attestation, the AI's verdict, permanently anchored. Success.
+
+23
+00:02:14,000 --> 00:02:17,500
+Bring your own AI model, wallets and data sources.
+
+24
+00:02:18,000 --> 00:02:22,500
+Integrations: Casper, AI models, Telegram, Discord,
+
+25
+00:02:23,000 --> 00:02:27,500
+real signing wallets, an MCP server for any AI agent, and the CSPR.trade DEX.
+
+26
+00:02:28,000 --> 00:02:32,000
+CasperFlow. Autonomous, verifiable AI agents on Casper.

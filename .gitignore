@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+mcp-server/node_modules/
+
+# Build output
+dist/
+mcp-server/dist/
+
+# ⚠️ Local dev scratch scripts — these contain TEST recovery phrases / keys.
+# NEVER publish them.
+*.mjs
+
+# OS / editor noise
+.DS_Store
+*.log
+.vscode/
+.idea/
+
+# Secrets / env
+.env
+.env.*
+*.pem
+*.key
+secret*
