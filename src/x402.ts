@@ -159,3 +159,78 @@ export async function payX402(opts: {
   }
   return { ok: res2.ok, status: res2.status, paid: true, body: (await res2.text()).slice(0, 2000), amount, payTo, asset: assetPkg, txHash }
 }
+
+// x402 "pay-and-prove": the agent receives a 402, pays the required amount on
+// Casper with a REAL transfer (via the `pay` callback), then replays the request
+// presenting the settlement tx hash. The server verifies that transfer on-chain
+// (CSPR.cloud) and returns the resource. End-to-end, real value settled on Casper.
+export async function payX402OnChain(opts: {
+  url: string
+  method: string
+  payerPublicHex: string
+  net: 'testnet' | 'mainnet'
+  maxPriceMotes?: bigint
+  pay: (payToHex: string, amountMotes: bigint) => Promise<{ ok: boolean; hash?: string; error?: string }>
+  log?: (m: string) => void
+}): Promise<X402Result> {
+  const url = /^https?:\/\//.test(opts.url) ? opts.url : `http://${opts.url}`
+  const log = opts.log ?? (() => {})
+
+  let res: Response
+  try {
+    res = await fetch(url, { method: opts.method })
+  } catch (e) {
+    return { ok: false, status: 0, paid: false, error: `Request failed: ${e instanceof Error ? e.message : 'network/CORS'}` }
+  }
+  if (res.status !== 402) {
+    return { ok: res.ok, status: res.status, paid: false, body: (await res.text()).slice(0, 2000) }
+  }
+
+  let reqJson: Record<string, unknown>
+  try {
+    reqJson = await res.json()
+  } catch {
+    return { ok: false, status: 402, paid: false, error: '402 returned no JSON payment requirements.' }
+  }
+  const accepts = (reqJson.accepts as Record<string, unknown>[]) || []
+  const accept = accepts.find((a) => String(a.network || '').startsWith('casper')) || accepts[0]
+  if (!accept) return { ok: false, status: 402, paid: false, error: 'No Casper payment option offered by this endpoint.' }
+  const amount = BigInt(String(accept.maxAmountRequired ?? accept.amount ?? accept.price ?? '0'))
+  const payTo = String(accept.payTo ?? accept.payee ?? '').trim()
+  const network = String(accept.network ?? (opts.net === 'mainnet' ? 'casper:casper' : 'casper:casper-test'))
+  if (!payTo) return { ok: false, status: 402, paid: false, error: 'Endpoint did not provide a payTo address.' }
+  if (opts.maxPriceMotes != null && amount > opts.maxPriceMotes) {
+    return { ok: false, status: 402, paid: false, amount: amount.toString(), error: `Price ${amount} exceeds your max — not paying.` }
+  }
+
+  log(`402: paying ${Number(amount) / 1e9} CSPR to ${payTo.slice(0, 10)}… on Casper`)
+  const p = await opts.pay(payTo, amount)
+  if (!p.ok || !p.hash) {
+    return { ok: false, status: 402, paid: false, amount: amount.toString(), payTo, error: `On-chain payment failed: ${p.error || 'unknown'}` }
+  }
+  log(`paid — settlement tx ${p.hash.slice(0, 16)}… — presenting proof, server is verifying on-chain`)
+
+  const header = b64(
+    JSON.stringify({
+      x402Version: (reqJson.x402Version as number) ?? 1,
+      scheme: String(accept.scheme ?? 'exact'),
+      network,
+      payload: { transaction: p.hash, payer: opts.payerPublicHex },
+    }),
+  )
+  let res2: Response
+  try {
+    res2 = await fetch(url, { method: opts.method, headers: { 'X-PAYMENT': header, 'PAYMENT-SIGNATURE': header } })
+  } catch (e) {
+    return { ok: false, status: 0, paid: true, amount: amount.toString(), payTo, txHash: p.hash, error: `Replay failed: ${e instanceof Error ? e.message : 'network'}` }
+  }
+  return {
+    ok: res2.ok,
+    status: res2.status,
+    paid: true,
+    body: (await res2.text()).slice(0, 2000),
+    amount: amount.toString(),
+    payTo,
+    txHash: p.hash,
+  }
+}

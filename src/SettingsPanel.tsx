@@ -85,6 +85,7 @@ interface Props {
   onChange: (s: Settings) => void
   onClose: () => void
   initialTab?: 'interface' | 'connections' | 'logs'
+  onOpenWiki?: () => void
 }
 
 const TABS = [
@@ -170,7 +171,7 @@ async function decryptPayload(salt: string, iv: string, ct: string, password: st
   return new TextDecoder().decode(pt)
 }
 
-export default function SettingsPanel({ settings, onChange, onClose, initialTab }: Props) {
+export default function SettingsPanel({ settings, onChange, onClose, initialTab, onOpenWiki }: Props) {
   const set = (patch: Partial<Settings>) => onChange({ ...settings, ...patch })
   const [tab, setTab] = useState<TabId>(initialTab ?? 'interface')
   const [openConn, setOpenConn] = useState<ConnId>('casper')
@@ -526,6 +527,11 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab 
                 <Icon name={t.icon} size={15} /> {t.label}
               </button>
             ))}
+            {onOpenWiki && (
+              <button className="settings-side-tab" onClick={onOpenWiki}>
+                <Icon name="book" size={15} /> Wiki
+              </button>
+            )}
           </nav>
         </div>
         <div className="settings-main">

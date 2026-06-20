@@ -117,7 +117,6 @@ export default function WorkspaceBar({
             <Icon name="layout" size={14} />
             <span className="ws-current-name">Workspace</span>
             {active && <span className="ws-current-num">{numberOf(activeId)}</span>}
-            <Icon name="branch" size={12} style={{ opacity: 0.5, transform: 'rotate(90deg)' }} />
           </button>
         )}
 

@@ -6,9 +6,11 @@ mcp-server/node_modules/
 dist/
 mcp-server/dist/
 
-# ⚠️ Local dev scratch scripts — these contain TEST recovery phrases / keys.
-# NEVER publish them.
-*.mjs
+# ⚠️ Local dev scratch scripts that contain TEST recovery phrases / keys. NEVER publish.
+/bip32test.mjs
+/derivetest.mjs
+/pktest.mjs
+/signtest.mjs
 
 # OS / editor noise
 .DS_Store

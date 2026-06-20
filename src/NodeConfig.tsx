@@ -55,6 +55,7 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
   const insertVars = [
     ...aiVars,
     'balance', 'sentcount', 'senttotal', 'price', 'amount', 'net', 'time', 'date', 'txurl', 'claimhash',
+    'x402body', 'x402endpoint', 'x402amount',
   ]
 
   const renderField = (p: (typeof def.params)[number]) => {

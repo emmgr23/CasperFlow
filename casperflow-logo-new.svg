@@ -1,0 +1,45 @@
+<svg width="320" height="300" viewBox="0 0 240 220" xmlns="http://www.w3.org/2000/svg" aria-label="CasperFlow">
+  <defs>
+    <linearGradient id="cfg" x1="180" y1="40" x2="80" y2="190" gradientUnits="userSpaceOnUse">
+      <stop offset="0%" stop-color="#FF3B30"/>
+      <stop offset="45%" stop-color="#F0356E"/>
+      <stop offset="72%" stop-color="#C03BC8"/>
+      <stop offset="100%" stop-color="#7C4DFF"/>
+    </linearGradient>
+    <filter id="glow" x="-40%" y="-40%" width="180%" height="180%">
+      <feGaussianBlur stdDeviation="5" result="b"/>
+      <feMerge>
+        <feMergeNode in="b"/>
+        <feMergeNode in="b"/>
+        <feMergeNode in="SourceGraphic"/>
+      </feMerge>
+    </filter>
+  </defs>
+
+  <!-- soft outer glow layer -->
+  <g filter="url(#glow)" opacity="0.55" fill="none" stroke="url(#cfg)" stroke-linecap="round" stroke-linejoin="round">
+    <path d="M 168 58 A 76 76 0 1 0 168 162" stroke-width="26"/>
+  </g>
+
+  <!-- crisp mark -->
+  <g fill="none" stroke="url(#cfg)" stroke-linecap="round" stroke-linejoin="round">
+    <!-- outer C crescent (opens to the right) -->
+    <path d="M 168 58 A 76 76 0 1 0 168 162" stroke-width="24"/>
+    <!-- inner parallel crescent (the double line) -->
+    <path d="M 150 72 A 52 52 0 1 0 150 148" stroke-width="11" opacity="0.92"/>
+
+    <!-- top-right node (ring cap of the C) -->
+    <circle cx="171" cy="57" r="9" stroke-width="13"/>
+
+    <!-- internal connected-nodes "flow" motif -->
+    <g stroke-width="13">
+      <path d="M 128 120 L 162 98"/>
+      <path d="M 128 120 L 128 166"/>
+      <path d="M 128 120 L 161 128"/>
+    </g>
+    <circle cx="128" cy="120" r="3.5" stroke-width="11"/>
+    <circle cx="164" cy="96"  r="8.5" stroke-width="11"/>
+    <circle cx="128" cy="168" r="9.5" stroke-width="11"/>
+    <circle cx="164" cy="129" r="6.5" stroke-width="10"/>
+  </g>
+</svg>

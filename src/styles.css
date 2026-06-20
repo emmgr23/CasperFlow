@@ -73,13 +73,30 @@ body {
 .topbar {
   position: relative; z-index: 70;
   display: flex; align-items: center; justify-content: space-between;
-  padding: 10px 18px;
+  padding: 32px 26px;
   background: rgba(13, 17, 28, 0.65);
   backdrop-filter: blur(18px);
   -webkit-backdrop-filter: blur(18px);
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
-.brand { display: flex; align-items: center; gap: 9px; flex: 1; min-width: 0; }
+/* The bottom hairline starts only after the left sidebar, not across the logo. */
+.topbar::after {
+  content: ''; position: absolute; bottom: 0; right: 0;
+  left: var(--sidebar-w, 0); height: 1px;
+  background: rgba(255, 255, 255, 0.07);
+}
+/* The sidebar's vertical divider continues up through the logo area to the top. */
+.topbar::before {
+  content: ''; position: absolute; top: 0; bottom: 0;
+  left: var(--sidebar-w, 0); width: 1px;
+  background: rgba(255, 255, 255, 0.06);
+}
+/* Logo + wordmark float at the very top-left, over the left sidebar column,
+   so the top bar can start after the sidebar and stay thin. */
+.brand {
+  position: absolute; top: 7px; left: 15px; z-index: 80;
+  display: flex; align-items: center; gap: 0;
+}
+.topbar-left { display: flex; align-items: center; min-width: 0; }
 .brand-mark {
   color: #ff5a3c;
   filter: drop-shadow(0 0 8px rgba(255, 90, 60, 0.6));
@@ -94,49 +111,57 @@ body {
 .wallet-connected:hover { background: rgba(45, 212, 191, 0.18) !important; }
 .brand-name {
   font-family: 'Orbitron', -apple-system, sans-serif;
-  font-size: 21px; font-weight: 700; letter-spacing: 0.5px;
-  background: linear-gradient(90deg, #FF3B30, #C0399E 55%, #7C4DFF);
+  font-size: 25px; font-weight: 700; letter-spacing: 0.5px;
+  margin-left: -20px;
+  background: linear-gradient(90deg, #F5303C 0%, #E0357A 50%, #7C4DFF 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand-sub { font-size: 12px; color: #64748b; margin-left: 8px; }
 
 /* ── Workspace bar ─────────────────────────────────────── */
-.ws-bar { position: relative; margin-left: 28px; flex: 1; min-width: 0; }
-.ws-cluster { display: flex; align-items: center; gap: 6px; border-radius: 10px; padding: 2px; min-width: 0; }
-.ws-cluster.drag-over { background: rgba(167, 139, 250, 0.1); outline: 1px dashed rgba(167, 139, 250, 0.45); }
+.ws-bar { position: relative; margin-left: 0; flex: 1; min-width: 0; }
+.ws-cluster { display: flex; align-items: center; gap: 2px; border-radius: 10px; padding: 0; min-width: 0; }
+.ws-cluster.drag-over { background: rgba(167, 139, 250, 0.08); outline: 1px dashed rgba(167, 139, 250, 0.4); border-radius: 10px; }
+/* Workspace switcher trigger — ghost */
 .ws-current, .ws-name-input {
   display: inline-flex; align-items: center; gap: 8px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 9px; padding: 6px 11px;
-  font-size: 13px; color: #e2e8f0; cursor: pointer;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 9px; padding: 7px 11px;
+  font-size: 15.5px; font-weight: 500; color: #94a3b8; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.ws-current:hover { background: rgba(255, 255, 255, 0.09); }
-.ws-current.drag-over { border-color: rgba(167, 139, 250, 0.7); background: rgba(167, 139, 250, 0.14); }
+.ws-current:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
+.ws-current.drag-over { background: rgba(167, 139, 250, 0.12); color: #ddd6fe; }
 .ws-current-name { font-weight: 500; max-width: 170px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .ws-current-num {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 17px; height: 17px; padding: 0 4px;
-  background: rgba(167, 139, 250, 0.22); color: #ddd6fe;
-  border-radius: 6px; font-size: 11px; font-weight: 700;
+  min-width: 19px; height: 19px; padding: 0 5px;
+  background: rgba(167, 139, 250, 0.18); color: #c4b5fd;
+  border-radius: 6px; font-size: 12.5px; font-weight: 700;
 }
-/* Pinned quick-switch buttons */
-.ws-pins { display: flex; align-items: center; gap: 5px; flex: 1; min-width: 90px; min-height: 27px; overflow: hidden; }
+/* Pinned quick-switch tabs — ghost; the active one is softly highlighted */
+.ws-pins {
+  display: flex; align-items: center; gap: 1px; flex: 1; min-width: 90px;
+  min-height: 27px; overflow: hidden;
+  margin-left: 5px; padding-left: 7px;
+  border-left: 1px solid rgba(255, 255, 255, 0.08);
+}
 .ws-pin {
-  position: relative; display: inline-flex; align-items: center; gap: 6px;
-  height: 27px; padding: 0 9px;
-  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 8px; color: #cbd5e1; font-size: 12.5px; cursor: pointer;
+  position: relative; display: inline-flex; align-items: center; gap: 8px;
+  height: 31px; padding: 0 11px;
+  background: transparent; border: 1px solid transparent;
+  border-radius: 8px; color: #94a3b8; font-size: 15px; font-weight: 500; cursor: pointer;
+  transition: background 0.15s, color 0.15s;
 }
-.ws-pin:hover { background: rgba(255, 255, 255, 0.1); }
-.ws-pin.active { background: rgba(167, 139, 250, 0.2); border-color: rgba(167, 139, 250, 0.55); color: #ddd6fe; }
+.ws-pin:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
+.ws-pin.active { background: rgba(167, 139, 250, 0.14); color: #ddd6fe; }
 .ws-pin-num {
   display: inline-flex; align-items: center; justify-content: center;
-  min-width: 16px; height: 16px; flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.09); border-radius: 5px;
-  font-size: 10.5px; font-weight: 700; color: #94a3b8;
+  min-width: 18px; height: 18px; flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.07); border-radius: 5px;
+  font-size: 12px; font-weight: 700; color: #64748b;
 }
-.ws-pin.active .ws-pin-num { background: rgba(167, 139, 250, 0.3); color: #ddd6fe; }
+.ws-pin.active .ws-pin-num { background: rgba(167, 139, 250, 0.28); color: #ddd6fe; }
 .ws-pin-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ws-pin-x {
   position: absolute; top: -6px; right: -6px;
@@ -191,12 +216,67 @@ body {
 }
 .ws-actions button:hover { background: rgba(255, 255, 255, 0.07); }
 .ws-sep { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 4px 0; }
-.topbar-actions { display: flex; align-items: center; gap: 10px; }
+.topbar-actions { display: flex; align-items: center; gap: 3px; }
 .badge-testnet {
-  font-size: 11.5px; padding: 4px 11px; border-radius: 12px;
-  background: rgba(45, 212, 191, 0.12); color: #5eead4;
-  border: 1px solid rgba(45, 212, 191, 0.25);
+  font-size: 11px; padding: 4px 10px; border-radius: 999px; margin-right: 4px;
+  background: rgba(45, 212, 191, 0.09); color: #5eead4;
+  border: 1px solid rgba(45, 212, 191, 0.18); letter-spacing: 0.2px;
 }
+/* Network toggle: teal on Testnet, amber (caution) on Mainnet. Click to switch. */
+.net-toggle {
+  display: inline-flex; align-items: center; gap: 7px; cursor: pointer;
+  font-size: 13.5px; font-weight: 600; padding: 6px 13px; border-radius: 999px;
+  margin-right: 4px; letter-spacing: 0.2px;
+  background: rgba(45, 212, 191, 0.10); color: #5eead4;
+  border: 1px solid rgba(45, 212, 191, 0.22);
+  transition: background 0.15s, border-color 0.15s;
+}
+.net-toggle:hover { background: rgba(45, 212, 191, 0.18); }
+.net-toggle .net-dot { width: 7px; height: 7px; border-radius: 50%; background: #2dd4bf; box-shadow: 0 0 6px #2dd4bf; }
+.net-toggle.mainnet { background: rgba(251, 146, 60, 0.12); color: #fdba74; border-color: rgba(251, 146, 60, 0.32); }
+.net-toggle.mainnet:hover { background: rgba(251, 146, 60, 0.2); }
+.net-toggle.mainnet .net-dot { background: #fb923c; box-shadow: 0 0 6px #fb923c; }
+
+/* Mainnet confirmation modal */
+.confirm-overlay {
+  position: fixed; inset: 0; z-index: 320;
+  background: rgba(5, 8, 14, 0.6); backdrop-filter: blur(4px);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.confirm-modal {
+  width: 100%; max-width: 420px; text-align: center;
+  background: rgba(15, 20, 33, 0.98); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 16px; padding: 26px 26px 22px;
+  box-shadow: 0 24px 70px rgba(0, 0, 0, 0.55);
+}
+.confirm-icon {
+  width: 46px; height: 46px; margin: 0 auto 14px;
+  display: flex; align-items: center; justify-content: center;
+  border-radius: 12px; color: #fdba74;
+  background: rgba(251, 146, 60, 0.14); border: 1px solid rgba(251, 146, 60, 0.3);
+}
+.confirm-title { margin: 0 0 10px; font-size: 18px; font-weight: 600; color: #f1f5f9; }
+.confirm-text { margin: 0 0 20px; font-size: 13.5px; line-height: 1.6; color: #94a3b8; }
+.confirm-text b { color: #cbd5e1; }
+.confirm-actions { display: flex; gap: 10px; justify-content: center; }
+
+/* ── Topbar redesign: calm, Linear/Vercel hierarchy ───────── */
+/* Thin group divider */
+.tb-div { width: 1px; height: 20px; background: rgba(255, 255, 255, 0.09); margin: 0 7px; flex-shrink: 0; }
+/* Secondary actions become ghost buttons (no box) */
+.topbar-actions .btn-secondary {
+  background: transparent; border: 1px solid transparent; color: #94a3b8;
+  border-radius: 9px; padding: 8px 13px; font-size: 16px; font-weight: 500;
+  backdrop-filter: none; transition: background 0.15s, color 0.15s;
+}
+.topbar-actions .btn-secondary:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
+.topbar-actions .btn-secondary svg { opacity: 0.85; }
+/* Wallet / active toggle: a quiet status chip, not a hard-bordered box */
+.topbar-actions .wallet-connected {
+  background: rgba(45, 212, 191, 0.09) !important; border-color: transparent !important;
+  color: #5eead4 !important;
+}
+.topbar-actions .wallet-connected:hover { background: rgba(45, 212, 191, 0.15) !important; }
 .badge-live {
   display: inline-flex; align-items: center; gap: 7px;
   font-size: 11.5px; font-weight: 600; padding: 4px 12px; border-radius: 12px;
@@ -211,13 +291,13 @@ body {
   border-color: rgba(255, 255, 255, 0.15) !important;
 }
 .btn-primary {
-  background: linear-gradient(135deg, #e0492f, #b9341c);
-  color: #fff; border: 1px solid rgba(255, 120, 90, 0.4); border-radius: 10px;
-  padding: 8px 18px; font-size: 14px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 0 18px rgba(224, 73, 47, 0.35);
-  transition: box-shadow 0.2s, transform 0.1s;
+  background: transparent;
+  color: #fca08e; border: 1px solid rgba(224, 73, 47, 0.5); border-radius: 9px;
+  padding: 8px 16px; font-size: 16px; font-weight: 600; cursor: pointer;
+  margin-left: 17px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
-.btn-primary:hover:not(:disabled) { box-shadow: 0 0 26px rgba(224, 73, 47, 0.55); }
+.btn-primary:hover:not(:disabled) { background: rgba(224, 73, 47, 0.14); border-color: rgba(224, 73, 47, 0.8); }
 .btn-primary:active:not(:disabled) { transform: scale(0.97); }
 .btn-primary:disabled { opacity: 0.55; cursor: wait; }
 .btn-secondary {
@@ -239,7 +319,7 @@ body {
 .palette {
   position: relative;
   flex-shrink: 0; border-right: 1px solid rgba(255, 255, 255, 0.06);
-  padding: 14px 12px; overflow-y: auto;
+  padding: 18px 12px 14px; overflow-y: auto;
 }
 .palette-resizer {
   position: absolute; top: 0; right: 0; bottom: 0; width: 7px;
@@ -249,16 +329,18 @@ body {
   background: linear-gradient(90deg, transparent, rgba(167, 139, 250, 0.35));
 }
 .palette-search {
-  width: 100%; margin-bottom: 14px;
-  font-size: 13px; padding: 7px 11px;
-  background: rgba(255, 255, 255, 0.05);
-  border: 1px solid rgba(255, 255, 255, 0.12);
-  border-radius: 9px; color: #e2e8f0;
+  width: 100%; margin-bottom: 16px;
+  font-size: 13.5px; padding: 7px 2px;
+  background: none; color: #e2e8f0;
+  border: none; border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0;
 }
 .palette-search::placeholder { color: #475569; }
+/* "Templates" reads like a category header (no chevron); spacer keeps the dot aligned. */
+.palette-chev-spacer { width: 15px; flex-shrink: 0; }
+.palette-templates-cta { margin-top: 4px; }
 .palette-search:focus {
-  outline: none; border-color: rgba(167, 139, 250, 0.55);
-  box-shadow: 0 0 10px rgba(167, 139, 250, 0.2);
+  outline: none; border-bottom-color: rgba(167, 139, 250, 0.6);
 }
 .palette-group { margin-bottom: 10px; }
 .palette-title {
@@ -741,35 +823,44 @@ body {
 
 /* ── AI command bar (iOS-26 "describe a shortcut" style) ── */
 .ai-cmdbar {
-  position: absolute; top: 16px; left: 50%; transform: translateX(-50%);
-  z-index: 30; display: flex; align-items: flex-start; gap: 9px;
-  width: min(620px, 70%); padding: 7px 8px 7px 13px;
-  background: rgba(17, 22, 38, 0.82);
-  backdrop-filter: blur(18px); -webkit-backdrop-filter: blur(18px);
-  border: 1px solid rgba(167, 139, 250, 0.3);
-  border-radius: 13px;
-  box-shadow: 0 8px 30px rgba(0, 0, 0, 0.4), 0 0 22px rgba(167, 139, 250, 0.12);
+  position: absolute; top: 16px; left: 50%;
+  transform: translateX(calc(-50% - var(--panel-offset, 0px)));
+  z-index: 30; display: flex; align-items: flex-start; gap: 8px;
+  width: min(640px, 72%); padding: 8px 8px 8px 18px;
+  background: rgba(17, 22, 38, 0.88);
+  backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px);
+  border: 1px solid rgba(167, 139, 250, 0.22);
+  border-radius: 14px;
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.38), inset 0 1px 0 rgba(255, 255, 255, 0.04);
+  transition: border-color 0.18s, box-shadow 0.18s;
 }
-.ai-cmdbar-icon { color: #c4b5fd; flex-shrink: 0; margin-top: 4px; }
+.ai-cmdbar:focus-within {
+  border-color: rgba(167, 139, 250, 0.5);
+  box-shadow: 0 10px 34px rgba(0, 0, 0, 0.42), 0 0 0 3px rgba(167, 139, 250, 0.12);
+}
 .ai-cmdbar-input {
   flex: 1; background: none; border: none; outline: none;
-  font-size: 13.5px; color: #e2e8f0; font-family: inherit;
-  resize: none; overflow-y: auto; line-height: 1.45;
-  max-height: 180px; padding: 2px 0; display: block;
+  font-size: 14px; color: #e2e8f0; font-family: inherit;
+  resize: none; line-height: 1.5;
+  max-height: 180px; padding: 7px 0; display: block;
+  overflow-y: auto; scrollbar-width: none; /* Firefox: hide bar */
 }
+.ai-cmdbar-input::-webkit-scrollbar { display: none; } /* Chrome/Safari: hide bar */
 .ai-cmdbar-input::placeholder { color: #64748b; }
-.ai-cmdbar-btn { margin-top: 1px; }
 .ai-cmdbar-btn {
-  flex-shrink: 0; background: linear-gradient(135deg, #7c4dff, #a78bfa);
-  border: none; border-radius: 9px; color: #fff;
-  font-size: 12.5px; font-weight: 600; padding: 7px 15px; cursor: pointer;
+  flex-shrink: 0; width: 34px; height: 34px;
+  display: inline-flex; align-items: center; justify-content: center;
+  background: transparent; border: 1px solid rgba(167, 139, 250, 0.5);
+  border-radius: 9px; color: #c4b5fd; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, opacity 0.15s;
 }
-.ai-cmdbar-btn:disabled { opacity: 0.55; cursor: default; }
-.ai-cmdbar-btn:hover:not(:disabled) { box-shadow: 0 0 16px rgba(167, 139, 250, 0.5); }
+.ai-cmdbar-btn:hover:not(:disabled) { background: rgba(167, 139, 250, 0.14); border-color: rgba(167, 139, 250, 0.75); }
+.ai-cmdbar-btn:disabled { opacity: 0.4; cursor: default; }
 
 /* ── Canvas toolbar ────────────────────────────────────── */
 .canvas-toolbar {
-  position: absolute; bottom: 18px; left: 50%; transform: translateX(-50%);
+  position: absolute; bottom: 18px; left: 50%;
+  transform: translateX(calc(-50% - var(--panel-offset, 0px)));
   z-index: 65;
   transition: bottom 0.12s ease;
   display: flex; align-items: center; gap: 3px;
@@ -788,6 +879,12 @@ body {
   transition: background 0.15s, color 0.15s;
 }
 .canvas-toolbar button:hover { background: rgba(255, 255, 255, 0.1); color: #fff; }
+/* The console launcher is labelled so it reads clearly as "the console". */
+.canvas-toolbar .toolbar-console {
+  width: auto; gap: 6px; padding: 0 11px; font-size: 12.5px; font-weight: 500;
+  color: #cbd5e1;
+}
+.canvas-toolbar .toolbar-console span { white-space: nowrap; }
 .canvas-toolbar .toolbar-active {
   background: rgba(224, 73, 47, 0.2);
   color: #fca5a5;
@@ -1647,17 +1744,38 @@ body {
 
 /* ── Right panel: tabbed Properties / Log ────────────────── */
 .rightpanel-tabs {
-  display: flex; align-items: center; gap: 4px; padding: 9px 12px;
-  border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  display: flex; align-items: center; justify-content: space-between; gap: 8px;
+  padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
-.rightpanel-tabs > button {
-  display: inline-flex; align-items: center; gap: 6px;
-  background: none; border: none; border-radius: 7px; cursor: pointer;
-  font-size: 12.5px; padding: 6px 11px; color: #94a3b8;
+/* Primary navigation: clean ghost tabs (no box) */
+.rp-tabgroup { display: inline-flex; gap: 2px; min-width: 0; }
+.rp-tab {
+  display: inline-flex; align-items: center; gap: 7px;
+  background: none; border: none; border-radius: 8px; cursor: pointer;
+  font-size: 13px; font-weight: 500; padding: 6px 11px; color: #94a3b8;
+  transition: background 0.15s, color 0.15s;
 }
-.rightpanel-tabs > button:hover { background: rgba(255, 255, 255, 0.05); color: #cbd5e1; }
-.rightpanel-tabs > button.active { background: rgba(167, 139, 250, 0.16); color: #ddd6fe; }
-.rightpanel-tabs .log-explain { margin-left: auto; }
+.rp-tab:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
+.rp-tab.active { background: rgba(167, 139, 250, 0.14); color: #ddd6fe; }
+/* Contextual actions (Explain / Clear) — small ghost icon buttons, lower weight */
+.rp-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
+.rp-action {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; background: none; border: none; border-radius: 8px;
+  color: #94a3b8; cursor: pointer; transition: background 0.15s, color 0.15s;
+}
+.rp-action:hover:not(:disabled) { background: rgba(255, 255, 255, 0.07); color: #e2e8f0; }
+.rp-action:disabled { opacity: 0.3; cursor: default; }
+.rp-div { width: 1px; height: 18px; background: rgba(255, 255, 255, 0.1); margin: 0 6px; }
+/* Collapse button — distinct, clearly the control for the right panel */
+.rp-collapse {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 8px; color: #cbd5e1; cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.rp-collapse:hover { background: rgba(167, 139, 250, 0.14); border-color: rgba(167, 139, 250, 0.42); color: #ddd6fe; }
 .props-empty {
   display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
   height: 100%; padding: 30px; text-align: center; color: #64748b; font-size: 13px;
@@ -1706,9 +1824,9 @@ body {
 }
 .rightpanel-hide:hover { background: rgba(255, 255, 255, 0.06); color: #cbd5e1; }
 .rightpanel-reopen {
-  position: absolute; top: 14px; right: 0; z-index: 30;
+  position: absolute; top: 19px; right: 0; z-index: 30;
   display: flex; align-items: center; justify-content: center;
-  width: 24px; height: 34px; cursor: pointer; color: #94a3b8;
+  width: 28px; height: 30px; cursor: pointer; color: #cbd5e1;
   background: rgba(17, 22, 38, 0.92); backdrop-filter: blur(10px);
   border: 1px solid rgba(255, 255, 255, 0.1); border-right: none;
   border-radius: 9px 0 0 9px;
@@ -1755,13 +1873,13 @@ body {
 
 /* ── Run once button (blue, mirrors the red Go live) ─────── */
 .btn-run {
-  background: linear-gradient(135deg, #2563eb, #1d4ed8);
-  color: #fff; border: 1px solid rgba(96, 165, 250, 0.45); border-radius: 10px;
-  padding: 8px 16px; font-size: 14px; font-weight: 600; cursor: pointer;
-  box-shadow: 0 0 16px rgba(37, 99, 235, 0.35);
-  transition: box-shadow 0.2s, transform 0.1s;
+  background: transparent;
+  color: #93c5fd; border: 1px solid rgba(96, 165, 250, 0.4); border-radius: 9px;
+  padding: 8px 16px; font-size: 16px; font-weight: 600; cursor: pointer;
+  margin-left: 10px;
+  transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
-.btn-run:hover:not(:disabled) { box-shadow: 0 0 26px rgba(37, 99, 235, 0.55); }
+.btn-run:hover:not(:disabled) { background: rgba(37, 99, 235, 0.14); border-color: rgba(96, 165, 250, 0.7); }
 .btn-run:active:not(:disabled) { transform: scale(0.97); }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
 

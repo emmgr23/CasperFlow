@@ -114,7 +114,8 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   // ── Beta: partial / best-effort ──
   swap: 'beta',
   quote: 'live', // real on-chain DEX rate read (CSPR.cloud)
-  x402: 'beta',
+  x402: 'live', // real pay-per-call: 402 → pay on Casper → server verifies on-chain → resource
+  x402sell: 'live', // monetize: publish an agent's output as a paid x402 listing
   pegmonitor: 'beta',
   // everything else defaults to 'soon'
 }
@@ -802,24 +803,55 @@ export const MODULES: ModuleDef[] = [
     category: 'action',
     icon: 'coin',
     params: [
-      { key: 'endpoint', label: 'API to call', type: 'text', default: 'api.example.com/market-data' },
-      { key: 'maxPrice', label: 'Max price per request', type: 'number', default: 0.01, suffix: 'CSPR' },
-      {
-        key: 'payToken',
-        label: 'Pay in',
-        type: 'select',
-        options: ['CSPR', 'USDC'],
-        default: 'USDC',
-        advanced: true,
-      },
-      { key: 'dailyCap', label: 'Daily spend cap', type: 'number', default: 5, suffix: '$', advanced: true },
+      { key: 'endpoint', label: 'API to call (x402)', type: 'text', default: 'http://localhost:4021/premium' },
+      { key: 'maxPrice', label: 'Max price per request', type: 'number', default: 3, suffix: 'CSPR' },
       { key: 'method', label: 'HTTP method', type: 'select', options: ['GET', 'POST'], default: 'GET', advanced: true },
     ],
     describe: (p) => trunc(String(p.endpoint)),
     simulate: (p) => ({
-      output: `${p.method ?? 'GET'} ${p.endpoint} → HTTP 402 (price ≤ ${p.maxPrice} ${p.payToken ?? 'USDC'}) → EIP-712 payment authorization signed → facilitator settles on-chain → data delivered in ~400ms (simulated)`,
+      output: `${p.method ?? 'GET'} ${p.endpoint} → HTTP 402 → pay up to ${p.maxPrice} CSPR on Casper → server verifies the transfer on-chain → resource delivered (simulated — connect a Wallet + enable live execution for a real payment)`,
       vars: { paid: Number(p.maxPrice) },
     }),
+  },
+  {
+    type: 'x402sell',
+    label: 'Sell via x402',
+    category: 'output',
+    icon: 'tag',
+    params: [
+      { key: 'endpoint', label: 'Publish to (x402 server)', type: 'text', default: 'http://localhost:4021/publish' },
+      { key: 'content', label: 'What you sell', type: 'text', default: '{{ai}}' },
+      { key: 'price', label: 'Price per call', type: 'number', default: 2.5, suffix: 'CSPR' },
+    ],
+    describe: (p) => `Sell output via x402 (${p.price} CSPR/call)`,
+    simulate: async (p): Promise<RunResult> => {
+      const endpoint = String(p.endpoint || '').trim()
+      if (!endpoint || endpoint.includes('example')) {
+        return {
+          output: `Listed "${trunc(String(p.content), 40)}" at ${p.price} CSPR/call (simulated — point this at a running x402 server to go live)`,
+          vars: { listed: 1 },
+        }
+      }
+      try {
+        const r = await fetch(endpoint, {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ content: String(p.content), price: Number(p.price) }),
+        })
+        if (r.ok) {
+          return {
+            output: `✓ Listed on x402 at ${p.price} CSPR/call — other agents can now pay for: "${trunc(String(p.content), 60)}"`,
+            vars: { listed: 1 },
+          }
+        }
+        return { output: `Sell via x402 failed: HTTP ${r.status}`, pass: false }
+      } catch (e) {
+        return {
+          output: `Sell via x402: could not reach ${endpoint} (${e instanceof Error ? e.message : 'network'}) — is the server running?`,
+          pass: false,
+        }
+      }
+    },
   },
   {
     type: 'swap',

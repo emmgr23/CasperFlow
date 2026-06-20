@@ -22,7 +22,7 @@ import SettingsPanel, { DEFAULT_SETTINGS, type Settings } from './SettingsPanel'
 import WikiPanel from './WikiPanel'
 import WorkspaceBar from './WorkspaceBar'
 import TemplateGallery from './TemplateGallery'
-import { type AgentTemplate, buildFromSpecs } from './templates'
+import { type AgentTemplate, buildFromSpecs, AGENT_TEMPLATES } from './templates'
 import { generateWorkflow, editWorkflow, askText } from './ai'
 import {
   loadStore, saveStore, newId, exportWorkspace, downloadJson, parseImport,
@@ -34,8 +34,8 @@ import ConsolePanel from './ConsolePanel'
 import HelpHints from './HelpHints'
 import NodeConfig from './NodeConfig'
 import { isWalletInstalled, connectWallet, disconnectWallet, reconnectIfConnected, onWalletEvents } from './wallet'
-import { sendCsprReal, delegateReal, callContractReal, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, getAgentAccountHashHex, setAgentKeyFromPem, setActiveSigner } from './tx'
-import { payX402 } from './x402'
+import { sendCsprReal, delegateReal, callContractReal, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
+import { payX402OnChain } from './x402'
 import { swapReal } from './swap'
 import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type WalletProfile } from './wallets'
 import { buildAttestation } from './attest'
@@ -432,6 +432,7 @@ function Flow() {
   const fileInputRef = useRef<HTMLInputElement>(null)
   const [settings, setSettings] = useState<Settings>(loadSettings())
   const [showSettings, setShowSettings] = useState(false)
+  const [confirmMainnet, setConfirmMainnet] = useState(false)
   const [showWiki, setShowWiki] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
   const [showConsole, setShowConsole] = useState(false)
@@ -1909,23 +1910,46 @@ function Flow() {
           }
         } else if (data.moduleType === 'x402') {
           const key = getAgentKey()
-          const ahHex = getAgentAccountHashHex()
-          if (!key || !ahHex) {
+          if (!key) {
             appendLog('x402: connect an autonomous Wallet to sign the payment — skipped.', 'warn')
           } else if (await confirmIfNeeded('x402 payment', `${params.endpoint}`)) {
             appendLog(`x402: requesting ${String(params.endpoint)} …`, 'info')
-            const r = await payX402({
+            const r = await payX402OnChain({
               url: String(params.endpoint),
               method: String(params.method || 'GET'),
-              signer: key,
               payerPublicHex: signerHex,
-              payerAccountHashHex: ahHex,
               net,
+              maxPriceMotes:
+                params.maxPrice != null && Number(params.maxPrice) > 0
+                  ? BigInt(Math.round(Number(params.maxPrice) * 1e9))
+                  : undefined,
+              pay: async (payTo, motes) => {
+                const rr = await sendCsprReal({
+                  net,
+                  senderHex: signerHex,
+                  recipientHex: payTo,
+                  amountCspr: Number(motes) / 1e9,
+                })
+                return { ok: rr.ok, hash: rr.hash, error: rr.error }
+              },
+              log: (m) => appendLog(`x402: ${m}`, 'info'),
             })
             if (r.paid && r.ok) {
-              appendLog(`✓ x402 paid ${r.amount} units → resource delivered (HTTP ${r.status})`, 'ok')
-              if (r.txHash) appendLog(`Settlement tx: ${r.txHash}`, 'info')
-              if (r.body) bag.x402body = r.body.slice(0, 500)
+              appendLog(`✓ x402 paid ${Number(r.amount) / 1e9} CSPR → resource delivered (HTTP ${r.status})`, 'ok')
+              if (r.txHash) {
+                const xurl = explorerTxUrl(net, r.txHash)
+                appendLog(`Settlement tx: ${r.txHash}`, 'info')
+                appendLog(`View: ${xurl}`, 'info')
+                bag.txurl = xurl
+                bag.hash = r.txHash
+              }
+              if (r.body) {
+                bag.x402body = r.body.slice(0, 500)
+                appendLog(`Resource: ${r.body.slice(0, 160)}`, 'step')
+              }
+              bag.x402endpoint = String(params.endpoint || '')
+              bag.x402amount = Number(r.amount) / 1e9
+              if (walletKey) refreshWalletBalance(walletKey)
             } else if (!r.paid && r.ok) {
               appendLog(`x402: resource was free (HTTP ${r.status}) — no payment needed.`, 'info')
               if (r.body) bag.x402body = r.body.slice(0, 500)
@@ -2150,9 +2174,9 @@ function Flow() {
     <>
       <button
         title={showConsole ? 'Hide live console' : 'Show live console'}
-        className={showConsole ? 'toolbar-active' : ''}
+        className={`toolbar-console${showConsole ? ' toolbar-active' : ''}`}
         onClick={() => setShowConsole((v) => !v)}
-      ><Icon name="terminal" size={15} /></button>
+      ><Icon name="terminal" size={15} /> <span>Console</span></button>
       <span className="toolbar-sep" />
       <button
         title="Pan mode — drag the canvas to move around"
@@ -2191,10 +2215,15 @@ function Flow() {
   return (
     <div className="app" style={{ ['--ui-scale' as string]: settings.scale }}>
       <HelpHints enabled={settings.help !== false} />
-      <header className="topbar">
-        <div className="brand">
-          <Logo size={39} />
-          <span className="brand-name">CasperFlow</span>
+      <div className="brand">
+        <Logo size={39} />
+        <span className="brand-name">CasperFlow</span>
+      </div>
+      <header
+        className="topbar"
+        style={{ paddingLeft: paletteWidth + 26, ['--sidebar-w' as string]: `${paletteWidth}px` }}
+      >
+        <div className="topbar-left">
           <WorkspaceBar
             workspaces={workspaces}
             activeId={activeId}
@@ -2220,23 +2249,21 @@ function Flow() {
               <span className="live-dot" /> LIVE · {liveInterval}
             </span>
           )}
-          <span className="badge-testnet">{settings.casperNet === 'mainnet' ? 'Mainnet' : 'Testnet'}</span>
           <button
-            className={`btn-secondary btn-icon${walletKey ? ' wallet-connected' : ''}`}
-            onClick={handleWalletConnect}
-            title={walletKey ? 'Click to disconnect' : 'Connect Casper Wallet'}
+            className={`net-toggle${settings.casperNet === 'mainnet' ? ' mainnet' : ''}`}
+            onClick={() => {
+              if (settings.casperNet === 'mainnet') {
+                setSettings({ ...settings, casperNet: 'testnet' })
+              } else {
+                setConfirmMainnet(true)
+              }
+            }}
+            title="Click to switch network (Testnet / Mainnet)"
           >
-            <Icon name="wallet" size={14} />
-            {walletKey
-              ? `${shortKey(walletKey)}${walletBalance !== null ? ` · ${walletBalance.toLocaleString('en-US', { maximumFractionDigits: 0 })} CSPR` : ''}`
-              : 'Connect wallet'}
+            <span className="net-dot" />
+            {settings.casperNet === 'mainnet' ? 'Mainnet' : 'Testnet'}
           </button>
-          <button className="btn-secondary btn-icon" onClick={() => setShowGallery(true)}>
-            <Icon name="note" size={14} /> Templates
-          </button>
-          <button className="btn-secondary btn-icon" onClick={() => setShowWiki(true)}>
-            <Icon name="book" size={14} /> Wiki
-          </button>
+          <span className="tb-div" />
           <button
             className="btn-secondary btn-icon"
             onClick={() => {
@@ -2255,13 +2282,7 @@ function Flow() {
           >
             <Icon name="gear" size={14} /> Settings
           </button>
-          <button
-            className={`btn-secondary btn-icon${showConsole ? ' wallet-connected' : ''}`}
-            onClick={() => setShowConsole((v) => !v)}
-            title="Live console — see everything in real time"
-          >
-            <Icon name="file-code" size={14} /> Console
-          </button>
+          <span className="tb-div" />
           <button
             className="btn-run btn-icon"
             onClick={() => {
@@ -2309,7 +2330,7 @@ function Flow() {
                     className="palette-chevron"
                     style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
                   />
-                  <span className="palette-dot" style={{ background: CATEGORY_COLORS[cat].border }} />
+                  <span className="palette-dot" style={{ background: cat === 'logic' ? '#22d3ee' : CATEGORY_COLORS[cat].border }} />
                   {CATEGORY_LABELS[cat]}
                   <span className="palette-count">{items.length}</span>
                 </button>
@@ -2334,6 +2355,16 @@ function Flow() {
               </div>
             )
           })}
+          <button
+            className="palette-title palette-title-btn palette-templates-cta"
+            onClick={() => setShowGallery(true)}
+            title="Browse agent templates"
+          >
+            <span className="palette-chev-spacer" />
+            <span className="palette-dot" style={{ background: '#94a3b8' }} />
+            Templates
+            <span className="palette-count">{AGENT_TEMPLATES.filter((t) => t.id !== 'blank').length}</span>
+          </button>
           <div className="palette-hint">
             Drag a module onto the canvas.<br />
             Right-click = options · Double-click = configure.
@@ -2343,6 +2374,7 @@ function Flow() {
         <div
           className="canvas"
           ref={wrapper}
+          style={{ ['--panel-offset' as string]: showRightPanel ? '0px' : `${logWidth / 2}px` }}
           onContextMenuCapture={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -2548,7 +2580,6 @@ function Flow() {
             )}
           </ReactFlow>
           <div className="ai-cmdbar">
-            <Icon name="wand" size={15} className="ai-cmdbar-icon" />
             <textarea
               ref={cmdRef}
               className="ai-cmdbar-input"
@@ -2565,8 +2596,13 @@ function Flow() {
               }}
               disabled={cmdBusy}
             />
-            <button className="ai-cmdbar-btn" onClick={runAiCommand} disabled={cmdBusy || !cmdValue.trim()}>
-              {cmdBusy ? 'Thinking…' : 'Apply'}
+            <button
+              className="ai-cmdbar-btn"
+              onClick={runAiCommand}
+              disabled={cmdBusy || !cmdValue.trim()}
+              title="Apply — build or edit the agent"
+            >
+              {cmdBusy ? <span className="spinner" /> : <Icon name="sparkles" size={16} />}
             </button>
           </div>
           {!showConsole && <div className="canvas-toolbar">{canvasToolbarInner}</div>}
@@ -2613,41 +2649,45 @@ function Flow() {
         <aside className="logpanel" style={{ width: logWidth }}>
           <div className="logpanel-resizer" onMouseDown={startLogResize} />
           <div className="rightpanel-tabs">
-            <button
-              className={rightTab === 'props' ? 'active' : ''}
-              onClick={() => setRightTab('props')}
-            >
-              <Icon name="gear" size={13} /> Properties
-            </button>
-            <button
-              className={rightTab === 'log' ? 'active' : ''}
-              onClick={() => setRightTab('log')}
-            >
-              <Icon name="file-code" size={13} /> Log
-            </button>
-            {rightTab === 'log' && (
-              <>
-                <button className="log-explain" onClick={explainRun} title="AI explains this run">
-                  <Icon name="sparkles" size={12} /> Explain
-                </button>
-                <button
-                  className="log-clear"
-                  onClick={() => setLog([])}
-                  title="Clear the log"
-                  disabled={log.length === 0}
-                >
-                  <Icon name="trash" size={12} /> Clear
-                </button>
-              </>
-            )}
-            <button
-              className="rightpanel-hide"
-              onClick={() => setShowRightPanel(false)}
-              title="Hide panel"
-              style={rightTab === 'props' ? { marginLeft: 'auto' } : undefined}
-            >
-              <Icon name="chevron" size={15} />
-            </button>
+            <div className="rp-tabgroup">
+              <button
+                className={`rp-tab${rightTab === 'props' ? ' active' : ''}`}
+                onClick={() => setRightTab('props')}
+              >
+                <Icon name="gear" size={14} /> Properties
+              </button>
+              <button
+                className={`rp-tab${rightTab === 'log' ? ' active' : ''}`}
+                onClick={() => setRightTab('log')}
+              >
+                <Icon name="file-code" size={14} /> Log
+              </button>
+            </div>
+            <div className="rp-actions">
+              {rightTab === 'log' && (
+                <>
+                  <button className="rp-action" onClick={explainRun} title="AI explains this run">
+                    <Icon name="sparkles" size={15} />
+                  </button>
+                  <button
+                    className="rp-action"
+                    onClick={() => setLog([])}
+                    title="Clear the log"
+                    disabled={log.length === 0}
+                  >
+                    <Icon name="trash" size={15} />
+                  </button>
+                  <span className="rp-div" />
+                </>
+              )}
+              <button
+                className="rp-collapse"
+                onClick={() => setShowRightPanel(false)}
+                title="Collapse panel"
+              >
+                <Icon name="chevron" size={16} />
+              </button>
+            </div>
           </div>
           {rightTab === 'props' ? (
             (() => {
@@ -2694,6 +2734,10 @@ function Flow() {
           onChange={setSettings}
           onClose={() => setShowSettings(false)}
           initialTab={settingsTab}
+          onOpenWiki={() => {
+            setShowSettings(false)
+            setShowWiki(true)
+          }}
         />
       )}
       {showConsole && (
@@ -2802,6 +2846,34 @@ function Flow() {
         </div>
       )}
       {showWiki && <WikiPanel onClose={() => setShowWiki(false)} />}
+      {confirmMainnet && (
+        <div className="confirm-overlay" onClick={() => setConfirmMainnet(false)}>
+          <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="confirm-icon"><Icon name="shield" size={22} /></div>
+            <h3 className="confirm-title">Switch to Mainnet?</h3>
+            <p className="confirm-text">
+              You are about to switch CasperFlow to the <b>Casper Mainnet</b>. On mainnet,
+              agents sign and submit <b>real transactions that move real CSPR</b>. Make sure
+              you only use a wallet you intend to spend from. Keep building and testing on
+              Testnet unless you are ready to go live.
+            </p>
+            <div className="confirm-actions">
+              <button className="btn-secondary settings-test" onClick={() => setConfirmMainnet(false)}>
+                Cancel
+              </button>
+              <button
+                className="btn-primary settings-test"
+                onClick={() => {
+                  setSettings({ ...settings, casperNet: 'mainnet' })
+                  setConfirmMainnet(false)
+                }}
+              >
+                Switch to Mainnet
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
       {showGallery && (
         <TemplateGallery
           onPick={createFromTemplate}
