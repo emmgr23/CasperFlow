@@ -16,6 +16,8 @@ import {
   KeyAlgorithm,
   Args,
   CLValue,
+  Key,
+  KeyTypeID,
   type Transaction,
 } from 'casper-js-sdk'
 import { signWithWallet } from './wallet'
@@ -264,6 +266,173 @@ export async function callContractReal(opts: {
   } catch (e) {
     const msg = e instanceof Error ? e.message : 'unknown error'
     debugLog('tx', `Contract call failed: ${msg}`)
+    return { ok: false, error: msg }
+  }
+}
+
+// Deploy a CEP-18 fungible token, no code. The compiled CEP-18 WASM must be
+// available (place cep18.wasm in /public). Args follow the casper-ecosystem/cep18
+// install signature; the exact set is validated on the first real testnet run.
+export async function deployTokenReal(opts: {
+  net: CasperNet
+  senderHex: string
+  name: string
+  symbol: string
+  decimals: number
+  totalSupply: string // base units, as a decimal string
+  paymentCspr: number
+  enableMintBurn?: boolean // dropdown: can new supply be minted / burned later?
+  emitEvents?: boolean // dropdown: emit CES events for indexers
+  wasmUrl?: string
+}): Promise<TxResult> {
+  try {
+    const fromHex = hasAgentKey() ? getAgentPublicHex()! : opts.senderHex
+    const url = opts.wasmUrl || '/cep18.wasm'
+    let bytes: Uint8Array
+    try {
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      bytes = new Uint8Array(await r.arrayBuffer())
+    } catch {
+      return {
+        ok: false,
+        error: `Contract WASM not found at ${url}. Add the compiled CEP-18 wasm to /public to enable real deploys (see SMART_CONTRACTS.md).`,
+      }
+    }
+    const casper = await CasperNetwork.create(rpcOf(opts.net), 2)
+    const args = Args.fromMap({
+      name: CLValue.newCLString(opts.name),
+      symbol: CLValue.newCLString(opts.symbol),
+      decimals: CLValue.newCLUint8(opts.decimals),
+      total_supply: CLValue.newCLUInt256(opts.totalSupply),
+      // events_mode: 0 = no events, 1 = CES (indexable on-chain events)
+      events_mode: CLValue.newCLUint8(opts.emitEvents ? 1 : 0),
+      // enable_mint_burn: 0 = fixed supply, 1 = mintable / burnable later
+      enable_mint_burn: CLValue.newCLUint8(opts.enableMintBurn ? 1 : 0),
+    })
+    const tx = casper.createSessionWasmTransaction(
+      PublicKey.fromHex(fromHex),
+      CHAIN[opts.net],
+      Math.round(opts.paymentCspr * MOTES),
+      1_800_000,
+      bytes,
+      args,
+    )
+    return await signSubmit(tx, fromHex, opts.net, `Deploy CEP-18 token "${opts.symbol}"`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    debugLog('tx', `Token deploy failed: ${msg}`)
+    return { ok: false, error: msg }
+  }
+}
+
+// ── CEP-78 NFT collection deploy — the "semi-automatic" contract: the caller
+// picks behaviours (ownership, minting, mutability, burnable…) from dropdowns,
+// and those choices map to the CEP-78 install modalities below. One audited,
+// pre-compiled WASM (place cep78.wasm in /public); no Rust compilation needed.
+// Numeric codes follow the casper-nft/cep78 standard; validated on first run.
+export async function deployNftReal(opts: {
+  net: CasperNet
+  senderHex: string
+  name: string
+  symbol: string
+  totalSupply: number // max number of NFTs the collection can ever hold
+  ownershipMode: number // 0 Minter · 1 Assigned (soulbound) · 2 Transferable
+  mintingMode: number // 0 Installer only · 1 Public · 2 ACL
+  metadataMutability: number // 0 Immutable · 1 Mutable
+  burnMode: number // 0 Burnable · 1 Non-burnable
+  allowMinting: boolean
+  nftKind?: number // 0 Physical · 1 Digital · 2 Virtual (default Digital)
+  metadataKind?: number // 0 CEP78 · 1 NFT721 · 2 Raw · 3 CustomValidated
+  identifierMode?: number // 0 Ordinal · 1 Hash (default Ordinal)
+  eventsMode?: number // 0 None · 1 CES (default CES)
+  paymentCspr: number
+  wasmUrl?: string
+}): Promise<TxResult> {
+  try {
+    const fromHex = hasAgentKey() ? getAgentPublicHex()! : opts.senderHex
+    const url = opts.wasmUrl || '/cep78.wasm'
+    let bytes: Uint8Array
+    try {
+      const r = await fetch(url)
+      if (!r.ok) throw new Error(`HTTP ${r.status}`)
+      bytes = new Uint8Array(await r.arrayBuffer())
+    } catch {
+      return {
+        ok: false,
+        error: `Contract WASM not found at ${url}. Add the compiled CEP-78 wasm to /public to enable real NFT deploys (see SMART_CONTRACTS.md).`,
+      }
+    }
+    const casper = await CasperNetwork.create(rpcOf(opts.net), 2)
+    const args = Args.fromMap({
+      collection_name: CLValue.newCLString(opts.name),
+      collection_symbol: CLValue.newCLString(opts.symbol),
+      total_token_supply: CLValue.newCLUint64(opts.totalSupply),
+      ownership_mode: CLValue.newCLUint8(opts.ownershipMode),
+      nft_kind: CLValue.newCLUint8(opts.nftKind ?? 1),
+      nft_metadata_kind: CLValue.newCLUint8(opts.metadataKind ?? 0),
+      identifier_mode: CLValue.newCLUint8(opts.identifierMode ?? 0),
+      metadata_mutability: CLValue.newCLUint8(opts.metadataMutability),
+      json_schema: CLValue.newCLString(''),
+      minting_mode: CLValue.newCLUint8(opts.mintingMode),
+      allow_minting: CLValue.newCLValueBool(opts.allowMinting),
+      burn_mode: CLValue.newCLUint8(opts.burnMode),
+      events_mode: CLValue.newCLUint8(opts.eventsMode ?? 1),
+      owner_reverse_lookup_mode: CLValue.newCLUint8(0),
+    })
+    const tx = casper.createSessionWasmTransaction(
+      PublicKey.fromHex(fromHex),
+      CHAIN[opts.net],
+      Math.round(opts.paymentCspr * MOTES),
+      1_800_000,
+      bytes,
+      args,
+    )
+    return await signSubmit(tx, fromHex, opts.net, `Deploy CEP-78 collection "${opts.symbol}"`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    debugLog('tx', `NFT deploy failed: ${msg}`)
+    return { ok: false, error: msg }
+  }
+}
+
+// Mint one NFT into a deployed CEP-78 collection. The recipient is given as a
+// public key (converted to a Key account-hash). Metadata is a JSON string the
+// node builds from the name / image-URL fields. Entrypoint + args follow the
+// CEP-78 `mint` signature (CEP78 metadata kind); validated on first real run.
+export async function mintNftReal(opts: {
+  net: CasperNet
+  senderHex: string
+  contractHash: string
+  ownerHex: string // recipient public key (blank = the signer)
+  metadataJson: string
+  paymentCspr: number
+}): Promise<TxResult> {
+  try {
+    const fromHex = hasAgentKey() ? getAgentPublicHex()! : opts.senderHex
+    const ownerHex = opts.ownerHex && /^0[12][0-9a-fA-F]+$/.test(opts.ownerHex) ? opts.ownerHex : fromHex
+    const ownerKey = Key.createByType(
+      PublicKey.fromHex(ownerHex).accountHash().toPrefixedString(),
+      KeyTypeID.Account,
+    )
+    const casper = await CasperNetwork.create(rpcOf(opts.net), 2)
+    const args = Args.fromMap({
+      token_owner: CLValue.newCLKey(ownerKey),
+      token_meta_data: CLValue.newCLString(opts.metadataJson),
+    })
+    const transaction = casper.createContractCallTransaction(
+      PublicKey.fromHex(fromHex),
+      opts.contractHash,
+      'mint',
+      CHAIN[opts.net],
+      Math.round(opts.paymentCspr * MOTES),
+      1_800_000,
+      args,
+    )
+    return await signSubmit(transaction, fromHex, opts.net, `Mint NFT`)
+  } catch (e) {
+    const msg = e instanceof Error ? e.message : 'unknown error'
+    debugLog('tx', `NFT mint failed: ${msg}`)
     return { ok: false, error: msg }
   }
 }

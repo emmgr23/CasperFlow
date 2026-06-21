@@ -53,6 +53,22 @@
   stroke-linecap: round; stroke-linejoin: round;
 }
 
+/* Thin electric crackle around a running button (Run once / Go live) */
+.btn-sparks {
+  position: absolute; inset: -1px; width: calc(100% + 2px); height: calc(100% + 2px);
+  overflow: visible; pointer-events: none; z-index: 1;
+  animation: cf-flicker 0.16s steps(2, end) infinite;
+}
+.btn-bolt-glow {
+  fill: none; stroke: currentColor; stroke-width: 2.2; opacity: 0.5;
+  stroke-linecap: round; stroke-linejoin: round;
+  filter: drop-shadow(0 0 4px currentColor);
+}
+.btn-bolt-core {
+  fill: none; stroke: #ffffff; stroke-width: 0.9;
+  stroke-linecap: round; stroke-linejoin: round;
+}
+
 body {
   margin: 0;
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
@@ -90,12 +106,24 @@ body {
   left: var(--sidebar-w, 0); width: 1px;
   background: rgba(255, 255, 255, 0.06);
 }
-/* Logo + wordmark float at the very top-left, over the left sidebar column,
-   so the top bar can start after the sidebar and stay thin. */
+/* Logo + wordmark float at the very top-left, over the left sidebar column.
+   Clicking it toggles the modules sidebar. */
 .brand {
   position: absolute; top: 7px; left: 15px; z-index: 80;
   display: flex; align-items: center; gap: 0;
+  background: none; border: none; padding: 0; cursor: pointer;
+  border-radius: 12px; transition: opacity 0.15s;
 }
+.brand:hover { opacity: 0.85; }
+/* The logo is decorative and must not be draggable out to the Finder/desktop. */
+.brand-logo-img {
+  -webkit-user-drag: none;
+  -khtml-user-drag: none;
+  user-select: none;
+  -webkit-user-select: none;
+}
+/* When the sidebar is collapsed, no vertical divider — the logo joins the top bar. */
+.topbar.collapsed::before { display: none; }
 .topbar-left { display: flex; align-items: center; min-width: 0; }
 .brand-mark {
   color: #ff5a3c;
@@ -286,15 +314,18 @@ body {
 }
 .badge-live .live-dot { background: #4ade80; box-shadow: 0 0 7px #4ade80; }
 .btn-stop {
-  background: linear-gradient(135deg, #475569, #334155) !important;
-  box-shadow: none !important;
-  border-color: rgba(255, 255, 255, 0.15) !important;
+  background: rgba(224, 73, 47, 0.2) !important;
+  color: #fecaca !important;
+  border-color: rgba(224, 73, 47, 0.9) !important;
+  box-shadow: 0 0 16px rgba(224, 73, 47, 0.35) !important;
 }
 .btn-primary {
+  position: relative;
   background: transparent;
   color: #fca08e; border: 1px solid rgba(224, 73, 47, 0.5); border-radius: 9px;
   padding: 8px 16px; font-size: 16px; font-weight: 600; cursor: pointer;
   margin-left: 17px;
+  min-width: 138px; justify-content: center;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 .btn-primary:hover:not(:disabled) { background: rgba(224, 73, 47, 0.14); border-color: rgba(224, 73, 47, 0.8); }
@@ -1873,13 +1904,22 @@ body {
 
 /* ── Run once button (blue, mirrors the red Go live) ─────── */
 .btn-run {
+  position: relative;
   background: transparent;
   color: #93c5fd; border: 1px solid rgba(96, 165, 250, 0.4); border-radius: 9px;
   padding: 8px 16px; font-size: 16px; font-weight: 600; cursor: pointer;
   margin-left: 10px;
+  min-width: 132px; justify-content: center;
   transition: background 0.15s, border-color 0.15s, transform 0.1s;
 }
 .btn-run:hover:not(:disabled) { background: rgba(37, 99, 235, 0.14); border-color: rgba(96, 165, 250, 0.7); }
+/* While running: light up (don't dim), to go with the electric border. */
+.btn-run.active-run {
+  opacity: 1 !important; cursor: default;
+  background: rgba(37, 99, 235, 0.2); color: #dbeafe;
+  border-color: rgba(96, 165, 250, 0.9);
+  box-shadow: 0 0 16px rgba(37, 99, 235, 0.35);
+}
 .btn-run:active:not(:disabled) { transform: scale(0.97); }
 .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
 

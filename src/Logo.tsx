@@ -5,8 +5,11 @@ import logoUrl from './casperflow-logo.png'
 export default function Logo({ size = 22 }: { size?: number }) {
   return (
     <img
+      className="brand-logo-img"
       src={logoUrl}
       alt="CasperFlow"
+      draggable={false}
+      onDragStart={(e) => e.preventDefault()}
       style={{
         height: size * 2.2,
         width: 'auto',
@@ -14,6 +17,10 @@ export default function Logo({ size = 22 }: { size?: number }) {
         flexShrink: 0,
         transform: 'scale(1.3)',
         transformOrigin: 'center',
+        userSelect: 'none',
+        WebkitUserSelect: 'none',
+        // Decorative — clicks go to the brand button; can't be dragged out.
+        pointerEvents: 'none',
       }}
     />
   )

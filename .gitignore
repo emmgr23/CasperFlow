@@ -5,12 +5,21 @@ mcp-server/node_modules/
 # Build output
 dist/
 mcp-server/dist/
+tsconfig.tsbuildinfo
+*.tsbuildinfo
 
 # ⚠️ Local dev scratch scripts that contain TEST recovery phrases / keys. NEVER publish.
 /bip32test.mjs
 /derivetest.mjs
 /pktest.mjs
 /signtest.mjs
+
+# Compiled contract binaries — large, fetch/verify provenance yourself (see SMART_CONTRACTS.md)
+public/*.wasm
+# Rust / Odra build artifacts
+contracts/**/target/
+contracts/**/wasm/
+contracts/**/.builder*
 
 # OS / editor noise
 .DS_Store

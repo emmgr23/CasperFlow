@@ -27,7 +27,7 @@ export function buildFromSpecs(
 }
 
 // Actions that move funds — the only ones an AI node should be allowed to gate.
-const SIGNABLE_TYPES = new Set(['transfer', 'stake', 'callcontract', 'swap', 'x402'])
+const SIGNABLE_TYPES = new Set(['transfer', 'stake', 'callcontract', 'swap', 'x402', 'deploytoken', 'deploynft', 'mintnft'])
 
 // Does following the edges out of `start` eventually reach a node matching `pred`?
 function reachesDownstream(
@@ -314,6 +314,58 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
         { type: 'ai', params: { instruction: 'Given the live CSPR price, should the agent act now?' } },
         { type: 'attest', params: { topic: 'agent-decision', data: 'AI verdict on CSPR at ${{price}} ({{time}})' } },
         { type: 'notify', params: { message: 'Decision attested on Casper · proof {{claimhash}}' } },
+      ]),
+  },
+  {
+    id: 'token-launchpad',
+    name: '★ Token Launchpad (CEP-18)',
+    icon: 'coin',
+    tagline: 'Deploy a token, no Rust',
+    description:
+      'No-code token issuance: pick the name, symbol, supply and behaviour (fixed vs mintable/burnable, on-chain events) from dropdowns, and the agent deploys a real CEP-18 fungible token on Casper — then alerts you with the contract link. Add the CEP-18 wasm to /public and enable live execution to deploy for real.',
+    build: () =>
+      buildChain([
+        { type: 'wallet', params: { mode: 'autonomous' } },
+        {
+          type: 'deploytoken',
+          params: { name: 'Demo Token', symbol: 'DEMO', decimals: 9, supply: 1000000, mintable: 'Mintable / burnable' },
+        },
+        { type: 'notify', params: { message: 'Token {{symbol}} deployed on Casper · {{txurl}}' } },
+      ]),
+  },
+  {
+    id: 'nft-launchpad',
+    name: '★ NFT Launchpad (CEP-78)',
+    icon: 'image',
+    tagline: 'Configurable collection, no Rust',
+    description:
+      'The "semi-automatic contract": choose ownership (transferable / soulbound), who can mint, mutable or immutable metadata and whether it is burnable — all from dropdowns — and the agent deploys a real CEP-78 NFT collection on Casper, then mints the first NFT. Add the CEP-78 wasm to /public and enable live execution to deploy for real.',
+    build: () =>
+      buildChain([
+        { type: 'wallet', params: { mode: 'autonomous' } },
+        {
+          type: 'deploynft',
+          params: { name: 'Demo Collection', symbol: 'DEMO', supply: 1000, ownership: 'Transferable', minting: 'Only me (installer)', metadata: 'Immutable', burnable: 'Yes' },
+        },
+        { type: 'notify', params: { message: 'Collection {{symbol}} deployed on Casper · {{txurl}}' } },
+      ]),
+  },
+  {
+    id: 'capped-treasury',
+    name: '★ Capped Treasury (Spend limit)',
+    icon: 'shield-dollar',
+    tagline: 'Autonomous, but budget-bounded',
+    description:
+      'A guardrailed agent: a Spend limit caps how much CSPR it can ever move per day, the AI decides whether to act, it pays a data service via x402 (verifying the response before trusting it), and produces a verifiable on-chain receipt. The safe pattern for autonomous payments.',
+    build: () =>
+      buildChain([
+        { type: 'schedule', params: { repeat: 'Repeat every', interval: 5, unit: 'minutes' } },
+        { type: 'wallet', params: { mode: 'autonomous' } },
+        { type: 'spendlimit', params: { max: 10, window: 'Day' } },
+        { type: 'ai', params: { instruction: 'Given the live CSPR price, is it worth buying a fresh data signal now?' } },
+        { type: 'x402', params: { endpoint: 'http://localhost:4021/premium', maxPrice: 3, minLength: 8 } },
+        { type: 'receipt', params: { title: 'Data purchase receipt' } },
+        { type: 'notify', params: { message: 'Signal bought within budget · receipt {{hash}}' } },
       ]),
   },
 

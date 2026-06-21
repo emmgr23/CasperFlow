@@ -1,4 +1,11 @@
-export type ModuleCategory = 'trigger' | 'logic' | 'action' | 'rwa' | 'output'
+export type ModuleCategory =
+  | 'trigger'
+  | 'logic'
+  | 'trading'
+  | 'payments'
+  | 'contracts'
+  | 'rwa'
+  | 'output'
 export type Params = Record<string, string | number>
 
 export interface ParamDef {
@@ -65,10 +72,13 @@ export interface ModuleDef {
   simulate: (p: Params, ctx: RunContext) => RunResult | Promise<RunResult>
 }
 
+// Order here = display order in the palette.
 export const CATEGORY_LABELS: Record<ModuleCategory, string> = {
   trigger: 'Triggers',
   logic: 'Logic',
-  action: 'Casper actions',
+  trading: 'Trading & DeFi',
+  payments: 'Payments',
+  contracts: 'Smart contracts',
   rwa: 'Real-world assets',
   output: 'Outputs',
 }
@@ -76,13 +86,16 @@ export const CATEGORY_LABELS: Record<ModuleCategory, string> = {
 export const CATEGORY_COLORS: Record<ModuleCategory, { bg: string; border: string; text: string }> = {
   trigger: { bg: 'rgba(139, 92, 246, 0.14)', border: '#a78bfa', text: '#ede9fe' },
   logic: { bg: 'rgba(148, 163, 184, 0.12)', border: '#94a3b8', text: '#e2e8f0' },
-  action: { bg: 'rgba(45, 212, 191, 0.12)', border: '#2dd4bf', text: '#ccfbf1' },
+  trading: { bg: 'rgba(45, 212, 191, 0.12)', border: '#2dd4bf', text: '#ccfbf1' },
+  payments: { bg: 'rgba(52, 211, 153, 0.13)', border: '#34d399', text: '#d1fae5' },
+  contracts: { bg: 'rgba(96, 165, 250, 0.13)', border: '#60a5fa', text: '#dbeafe' },
   rwa: { bg: 'rgba(251, 191, 36, 0.13)', border: '#fbbf24', text: '#fef3c7' },
   output: { bg: 'rgba(251, 146, 60, 0.14)', border: '#fb923c', text: '#ffedd5' },
 }
 
 // Categories whose actions can be signed autonomously or require approval.
-export const SIGNABLE = (c: ModuleCategory) => c === 'action' || c === 'rwa'
+export const SIGNABLE = (c: ModuleCategory) =>
+  c === 'trading' || c === 'payments' || c === 'contracts' || c === 'rwa'
 
 // Three tiers of reality, shown on every card:
 //  'live' = works for real now (real reads, real signed transactions, real sends)
@@ -98,6 +111,7 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   setvar: 'live',
   delay: 'live',
   cooldown: 'live',
+  spendlimit: 'live', // budget guardrail: blocks real payments above the cap
   code: 'live',
   ai: 'live',
   readbalance: 'live', // real on-chain balance read (CSPR.cloud)
@@ -113,9 +127,13 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   attest: 'live', // real EIP-712 attestation anchored on testnet
   // ── Beta: partial / best-effort ──
   swap: 'beta',
+  deploytoken: 'beta', // no-code CEP-18 token deploy (needs the compiled wasm in /public)
+  deploynft: 'beta', // no-code CEP-78 NFT collection deploy (needs cep78.wasm in /public)
+  mintnft: 'beta', // mint into a deployed CEP-78 collection
   quote: 'live', // real on-chain DEX rate read (CSPR.cloud)
   x402: 'live', // real pay-per-call: 402 → pay on Casper → server verifies on-chain → resource
   x402sell: 'live', // monetize: publish an agent's output as a paid x402 listing
+  receipt: 'live', // verifiable on-chain payment receipt (reads the settlement)
   pegmonitor: 'beta',
   // everything else defaults to 'soon'
 }
@@ -798,18 +816,45 @@ export const MODULES: ModuleDef[] = [
     }),
   },
   {
+    type: 'spendlimit',
+    label: 'Spend limit',
+    category: 'logic',
+    icon: 'shield-dollar',
+    params: [
+      { key: 'max', label: 'Max spend', type: 'number', default: 10, suffix: 'CSPR' },
+      {
+        key: 'window',
+        label: 'Per',
+        type: 'select',
+        options: ['This run', 'Day', 'All time'],
+        default: 'Day',
+      },
+    ],
+    describe: (p) => `Cap ${p.max} CSPR / ${String(p.window || 'Day').toLowerCase()}`,
+    simulate: (p) => {
+      const cap = Number(p.max) || 0
+      const win = String(p.window || 'Day').toLowerCase()
+      return {
+        output: `Spend limit armed: this agent will not spend more than ${cap} CSPR per ${win}. Any real on-chain payment that would exceed the cap is blocked.`,
+        vars: { spendcap: cap },
+      }
+    },
+  },
+  {
     type: 'x402',
     label: 'x402 payment',
-    category: 'action',
+    category: 'payments',
     icon: 'coin',
     params: [
       { key: 'endpoint', label: 'API to call (x402)', type: 'text', default: 'http://localhost:4021/premium' },
       { key: 'maxPrice', label: 'Max price per request', type: 'number', default: 3, suffix: 'CSPR' },
       { key: 'method', label: 'HTTP method', type: 'select', options: ['GET', 'POST'], default: 'GET', advanced: true },
+      { key: 'verifyContains', label: 'Require response contains', type: 'text', default: '', advanced: true },
+      { key: 'minLength', label: 'Min response length', type: 'number', default: 0, suffix: 'chars', advanced: true },
     ],
     describe: (p) => trunc(String(p.endpoint)),
     simulate: (p) => ({
-      output: `${p.method ?? 'GET'} ${p.endpoint} → HTTP 402 → pay up to ${p.maxPrice} CSPR on Casper → server verifies the transfer on-chain → resource delivered (simulated — connect a Wallet + enable live execution for a real payment)`,
+      output: `${p.method ?? 'GET'} ${p.endpoint} → HTTP 402 → pay up to ${p.maxPrice} CSPR on Casper → server verifies the transfer on-chain → resource delivered${String(p.verifyContains || '').trim() || Number(p.minLength) > 0 ? ' → response verified before it is trusted' : ''} (simulated — connect a Wallet + enable live execution for a real payment)`,
       vars: { paid: Number(p.maxPrice) },
     }),
   },
@@ -854,9 +899,49 @@ export const MODULES: ModuleDef[] = [
     },
   },
   {
+    type: 'receipt',
+    label: 'Verifiable receipt',
+    category: 'output',
+    icon: 'certificate',
+    params: [
+      { key: 'title', label: 'Receipt title', type: 'text', default: 'Payment receipt' },
+    ],
+    describe: () => `On-chain verifiable receipt`,
+    // Builds a permanent, explorer-verifiable receipt from the settlement an
+    // upstream x402 payment (or Send) already produced this run. Pure read of
+    // run variables — no extra transaction.
+    simulate: (p, ctx): RunResult => {
+      const v = ctx.vars ?? {}
+      const tx = String(v.hash ?? v.paytx ?? '')
+      const url = String(v.txurl ?? v.payexplorer ?? '')
+      const amount = v.x402amount ?? v.payamount ?? v.amount ?? ''
+      const to = String(v.x402payto ?? v.payto ?? v.to ?? '')
+      const resource = String(v.x402endpoint ?? v.payresource ?? '')
+      const net = String(ctx.casperNet ?? 'testnet')
+      if (!tx) {
+        return {
+          output:
+            'Receipt: no settled payment found upstream yet — place this node after an x402 payment or a Send so it can certify a real settlement.',
+          pass: false,
+        }
+      }
+      const lines = [
+        `🧾 ${String(p.title || 'Payment receipt').toUpperCase()}`,
+        resource ? `Resource: ${resource}` : '',
+        amount !== '' ? `Amount:   ${amount} CSPR` : '',
+        to ? `Paid to:  ${to}` : '',
+        `Network:  ${net}`,
+        `Settled:  ${tx}`,
+        url ? `Verify:   ${url}` : '',
+        `Time:     ${String(v.time ?? new Date().toISOString())}`,
+      ].filter(Boolean)
+      return { output: lines.join('\n'), vars: { receipt: tx } }
+    },
+  },
+  {
     type: 'swap',
     label: 'CSPR.trade swap',
-    category: 'action',
+    category: 'trading',
     icon: 'repeat',
     params: [
       { key: 'tokenIn', label: 'From token', type: 'text', default: 'CSPR' },
@@ -882,7 +967,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'quote',
     label: 'Get swap quote',
-    category: 'action',
+    category: 'trading',
     icon: 'tag',
     params: [
       { key: 'fromToken', label: 'From token (package hash)', type: 'text', default: '' },
@@ -914,7 +999,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'limitorder',
     label: 'Limit order',
-    category: 'action',
+    category: 'trading',
     icon: 'target',
     params: [
       { key: 'side', label: 'Side', type: 'select', options: ['Buy', 'Sell'], default: 'Buy' },
@@ -953,7 +1038,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'perp',
     label: 'Perp LONG/SHORT (Delta)',
-    category: 'action',
+    category: 'trading',
     icon: 'candles',
     params: [
       { key: 'side', label: 'Side', type: 'select', options: ['LONG', 'SHORT'], default: 'LONG' },
@@ -989,7 +1074,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'compound',
     label: 'Auto-compound staking',
-    category: 'action',
+    category: 'trading',
     icon: 'percent',
     params: [
       { key: 'staked', label: 'Currently staked', type: 'number', default: 10000, suffix: 'CSPR' },
@@ -1014,7 +1099,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'predict',
     label: 'Prediction bet (CSPR.guru)',
-    category: 'action',
+    category: 'trading',
     icon: 'sparkles',
     params: [
       { key: 'market', label: 'Market question', type: 'text', default: 'Will CSPR close the week above $0.025?' },
@@ -1030,7 +1115,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'stoploss',
     label: 'Stop-loss',
-    category: 'action',
+    category: 'trading',
     icon: 'shield-dollar',
     params: [
       { key: 'entry', label: 'Entry price', type: 'number', default: 0.02, suffix: '$' },
@@ -1069,7 +1154,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'takeprofit',
     label: 'Take-profit',
-    category: 'action',
+    category: 'trading',
     icon: 'trending',
     params: [
       { key: 'entry', label: 'Entry price', type: 'number', default: 0.02, suffix: '$' },
@@ -1100,7 +1185,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'dca',
     label: 'DCA buy',
-    category: 'action',
+    category: 'trading',
     icon: 'coin',
     params: [
       { key: 'spend', label: 'Buy each run', type: 'number', default: 50, suffix: '$' },
@@ -1121,7 +1206,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'attest',
     label: 'Attest on Casper',
-    category: 'action',
+    category: 'contracts',
     icon: 'certificate',
     params: [
       { key: 'topic', label: 'Topic', type: 'text', default: 'agent-decision' },
@@ -1189,9 +1274,107 @@ export const MODULES: ModuleDef[] = [
     },
   },
   {
+    type: 'deploytoken',
+    label: 'Deploy token (CEP-18)',
+    category: 'contracts',
+    icon: 'coin',
+    params: [
+      { key: 'name', label: 'Token name', type: 'text', default: 'My Token' },
+      { key: 'symbol', label: 'Symbol', type: 'text', default: 'MYT' },
+      { key: 'decimals', label: 'Decimals', type: 'number', default: 9 },
+      { key: 'supply', label: 'Total supply', type: 'number', default: 1000000 },
+      {
+        key: 'mintable',
+        label: 'Supply',
+        type: 'select',
+        options: ['Fixed forever', 'Mintable / burnable'],
+        default: 'Fixed forever',
+      },
+      {
+        key: 'events',
+        label: 'On-chain events',
+        type: 'select',
+        options: ['On (CES)', 'Off'],
+        default: 'On (CES)',
+      },
+      { key: 'payment', label: 'Deploy gas', type: 'number', default: 200, suffix: 'CSPR', advanced: true },
+    ],
+    describe: (p) => `Deploy ${p.symbol} token (CEP-18)`,
+    simulate: (p) => {
+      const mint = String(p.mintable || '').startsWith('Mint') ? 'mintable/burnable' : 'fixed supply'
+      return {
+        output: `Would deploy a CEP-18 token "${p.name}" (${p.symbol}, ${p.decimals} decimals, supply ${p.supply}, ${mint}) on Casper (simulated — connect a Wallet, enable live execution, and add the CEP-18 wasm to /public for a real deploy)`,
+        vars: { symbol: String(p.symbol) },
+      }
+    },
+  },
+  {
+    type: 'deploynft',
+    label: 'Deploy NFT collection (CEP-78)',
+    category: 'contracts',
+    icon: 'image',
+    params: [
+      { key: 'name', label: 'Collection name', type: 'text', default: 'My Collection' },
+      { key: 'symbol', label: 'Symbol', type: 'text', default: 'MYNFT' },
+      { key: 'supply', label: 'Max NFTs', type: 'number', default: 1000 },
+      {
+        key: 'ownership',
+        label: 'Ownership',
+        type: 'select',
+        options: ['Transferable', 'Soulbound (non-transferable)', 'Minter-owned'],
+        default: 'Transferable',
+      },
+      {
+        key: 'minting',
+        label: 'Who can mint',
+        type: 'select',
+        options: ['Only me (installer)', 'Public'],
+        default: 'Only me (installer)',
+      },
+      {
+        key: 'metadata',
+        label: 'Metadata',
+        type: 'select',
+        options: ['Immutable', 'Mutable'],
+        default: 'Immutable',
+      },
+      {
+        key: 'burnable',
+        label: 'Burnable',
+        type: 'select',
+        options: ['Yes', 'No'],
+        default: 'Yes',
+      },
+      { key: 'payment', label: 'Deploy gas', type: 'number', default: 250, suffix: 'CSPR', advanced: true },
+    ],
+    describe: (p) => `Deploy ${p.symbol} NFT collection (CEP-78)`,
+    simulate: (p) => ({
+      output: `Would deploy a CEP-78 collection "${p.name}" (${p.symbol}, max ${p.supply}, ${String(p.ownership).toLowerCase()}, ${String(p.minting).toLowerCase()} minting, ${String(p.metadata).toLowerCase()} metadata, burnable: ${p.burnable}) on Casper (simulated — connect a Wallet, enable live execution, and add the CEP-78 wasm to /public for a real deploy)`,
+      vars: { symbol: String(p.symbol) },
+    }),
+  },
+  {
+    type: 'mintnft',
+    label: 'Mint NFT',
+    category: 'contracts',
+    icon: 'image',
+    params: [
+      { key: 'collection', label: 'Collection contract hash', type: 'text', default: '{{collection}}' },
+      { key: 'name', label: 'NFT name', type: 'text', default: 'My NFT #1' },
+      { key: 'image', label: 'Image URL', type: 'text', default: 'https://…' },
+      { key: 'owner', label: 'Mint to (public key, blank = me)', type: 'text', default: '', advanced: true },
+      { key: 'payment', label: 'Mint gas', type: 'number', default: 5, suffix: 'CSPR', advanced: true },
+    ],
+    describe: (p) => `Mint "${trunc(String(p.name), 18)}"`,
+    simulate: (p) => ({
+      output: `Would mint NFT "${p.name}" (image ${trunc(String(p.image), 30)}) into ${trunc(String(p.collection), 16)} on Casper (simulated — connect a Wallet + enable live execution to mint for real)`,
+      vars: { nftname: String(p.name) },
+    }),
+  },
+  {
     type: 'transfer',
     label: 'Send CSPR',
-    category: 'action',
+    category: 'payments',
     icon: 'send',
     params: [
       { key: 'to', label: 'Recipient (public key)', type: 'text', default: '02c4d6…a1b9' },
@@ -1212,7 +1395,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'stake',
     label: 'Stake / delegate',
-    category: 'action',
+    category: 'trading',
     icon: 'shield',
     params: [
       {
@@ -1255,7 +1438,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'callcontract',
     label: 'Call contract',
-    category: 'action',
+    category: 'contracts',
     icon: 'terminal',
     params: [
       { key: 'contract', label: 'Contract hash', type: 'text', default: 'hash-a1b2…' },
@@ -1272,7 +1455,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'bridge',
     label: 'Bridge assets',
-    category: 'action',
+    category: 'payments',
     icon: 'bridge',
     params: [
       { key: 'amount', label: 'Amount', type: 'number', default: 100, suffix: 'CSPR' },
@@ -1302,7 +1485,7 @@ export const MODULES: ModuleDef[] = [
   {
     type: 'deploy',
     label: 'Deploy contract',
-    category: 'action',
+    category: 'contracts',
     icon: 'file-code',
     params: [
       {

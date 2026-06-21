@@ -34,7 +34,7 @@ import ConsolePanel from './ConsolePanel'
 import HelpHints from './HelpHints'
 import NodeConfig from './NodeConfig'
 import { isWalletInstalled, connectWallet, disconnectWallet, reconnectIfConnected, onWalletEvents } from './wallet'
-import { sendCsprReal, delegateReal, callContractReal, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
+import { sendCsprReal, delegateReal, callContractReal, deployTokenReal, deployNftReal, mintNftReal, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
 import { payX402OnChain } from './x402'
 import { swapReal } from './swap'
 import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type WalletProfile } from './wallets'
@@ -45,6 +45,7 @@ import { getAccountBalance, shortKey } from './casper'
 import Icon from './Icon'
 import Logo from './Logo'
 import PulseEdge from './PulseEdge'
+import BorderSparks from './Sparks'
 
 const nodeTypes = { module: ModuleNode, group: GroupNode, note: NoteNode }
 const edgeTypes = { pulse: PulseEdge }
@@ -433,6 +434,7 @@ function Flow() {
   const [settings, setSettings] = useState<Settings>(loadSettings())
   const [showSettings, setShowSettings] = useState(false)
   const [confirmMainnet, setConfirmMainnet] = useState(false)
+  const [paletteOpen, setPaletteOpen] = useState(true)
   const [showWiki, setShowWiki] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
   const [showConsole, setShowConsole] = useState(false)
@@ -513,7 +515,7 @@ function Flow() {
     const w = Number(localStorage.getItem(STORAGE_PALETTE))
     return w >= 170 && w <= 440 ? w : 218
   })
-  const { screenToFlowPosition, getViewport, fitView, zoomIn, zoomOut } = useReactFlow()
+  const { screenToFlowPosition, getViewport, setViewport, fitView, zoomIn, zoomOut } = useReactFlow()
   const [locked, setLocked] = useState(false)
   const updateNodeInternals = useUpdateNodeInternals()
   const wrapper = useRef<HTMLDivElement>(null)
@@ -1581,9 +1583,52 @@ function Flow() {
     const totalSignable = currentNodes.filter(
       (n) =>
         n.type === 'module' &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes((n.data as ModuleNodeData).moduleType),
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes((n.data as ModuleNodeData).moduleType),
     ).length
     let approvalSeq = 0
+
+    // ── Spend-limit guardrail ────────────────────────────────────────────────
+    // A "Spend limit" node arms a budget cap; every real paying action below
+    // checks it via enforceSpend() and is blocked if it would push spend over
+    // the cap. Daily / all-time totals persist in agentMemory across runs.
+    let spendCapCspr: number | null = null
+    let spendWindow: 'This run' | 'Day' | 'All time' = 'Day'
+    let spentThisRun = 0
+    const spendToday = (): number => {
+      const today = new Date().toISOString().slice(0, 10)
+      if (agentMemory.__spendDate !== today) {
+        agentMemory.__spendDate = today
+        agentMemory.__spentToday = 0
+      }
+      return Number(agentMemory.__spentToday || 0)
+    }
+    const priorSpend = (): number =>
+      spendWindow === 'This run'
+        ? spentThisRun
+        : spendWindow === 'All time'
+          ? Number(agentMemory.__spentTotal || 0)
+          : spendToday()
+    const enforceSpend = (amountCspr: number, label: string): boolean => {
+      if (spendCapCspr == null || !(amountCspr > 0)) return true
+      const prior = priorSpend()
+      if (prior + amountCspr > spendCapCspr + 1e-9) {
+        appendLog(
+          `🛡️ Spend limit reached — ${label} of ${amountCspr} CSPR blocked (cap ${spendCapCspr} CSPR / ${spendWindow.toLowerCase()}, already spent ${prior.toFixed(2)}).`,
+          'warn',
+        )
+        bag.spendblocked = (Number(bag.spendblocked) || 0) + 1
+        return false
+      }
+      return true
+    }
+    const recordSpend = (amountCspr: number): void => {
+      if (!(amountCspr > 0)) return
+      spentThisRun += amountCspr
+      spendToday() // roll the daily bucket to today if needed
+      agentMemory.__spentToday = Number(agentMemory.__spentToday || 0) + amountCspr
+      agentMemory.__spentTotal = Number(agentMemory.__spentTotal || 0) + amountCspr
+      bag.spendtotalrun = Number(spentThisRun.toFixed(4))
+    }
 
     while (queue.length > 0) {
       const id = queue.shift()!
@@ -1660,6 +1705,21 @@ function Flow() {
         continue
       }
 
+      // ── Spend limit node: arm the budget cap for the rest of this run ──
+      if (data.moduleType === 'spendlimit') {
+        spendCapCspr = Number(params.max) || 0
+        const w = String(params.window || 'Day')
+        spendWindow = w === 'This run' || w === 'All time' ? w : 'Day'
+        appendLog(
+          `🛡️ Spend limit armed: ≤ ${spendCapCspr} CSPR per ${spendWindow.toLowerCase()} (already spent ${priorSpend().toFixed(2)}). Payments above the cap will be blocked.`,
+          'info',
+        )
+        bag.spendcap = spendCapCspr
+        setNodeStatus(id, 'done')
+        currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
+        continue
+      }
+
       // ── Real on-chain execution (testnet) for Live actions ──
       // We always sign LOCALLY with the wallet's key (no browser extension needed,
       // so the extension's connected account is irrelevant). "Manual" just adds an
@@ -1669,7 +1729,7 @@ function Flow() {
       // 1) Use the Wallet node connected UPSTREAM to this signable action.
       if (
         settingsRef.current.liveExecution &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
       ) {
         const wnode = findUpstreamWallet(id, currentNodes, currentEdges)
         if (wnode) {
@@ -1713,7 +1773,7 @@ function Flow() {
         autoSignRef.current &&
         !hasWalletNode &&
         !hasAgentKey() &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
       ) {
         const w =
           loadWalletProfiles().find((x) => x.mode === 'autonomous') || loadWalletProfiles()[0]
@@ -1738,7 +1798,7 @@ function Flow() {
       if (
         settingsRef.current.liveExecution &&
         !signerHex &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
       ) {
         appendLog(
           `${def.label}: no signing key active — connect a Wallet (Autonomous) upstream, or this action is skipped.`,
@@ -1778,6 +1838,7 @@ function Flow() {
           return ok
         }
         let handled = true
+        let branchStops = false
         if (data.moduleType === 'transfer') {
           const to = String(params.to).trim().replace(/^account-hash-/i, '')
           const validKey = /^01[0-9a-fA-F]{64}$/.test(to) || /^02[0-9a-fA-F]{66}$/.test(to)
@@ -1789,6 +1850,8 @@ function Flow() {
               `Send CSPR (LIVE): "${to.slice(0, 10)}…" is not a valid recipient (public key or resolved CSPR.name) — skipped.`,
               'warn',
             )
+          } else if (!enforceSpend(Number(params.amount), 'Send CSPR')) {
+            /* blocked by spend limit — skip */
           } else if (
             await confirmIfNeeded('Send CSPR', `${params.amount} CSPR → ${to.slice(0, 8)}…${to.slice(-4)}`)
           ) {
@@ -1799,6 +1862,7 @@ function Flow() {
             })
             report('transfer', txRes)
             if (txRes.ok) {
+              recordSpend(Number(params.amount))
               addRecentTx(signerHex, {
                 hash: txRes.hash || '',
                 amount: Number(params.amount),
@@ -1815,18 +1879,24 @@ function Flow() {
           }
         } else if (data.moduleType === 'stake') {
           const validator = String(params.validator).trim()
+          const stakeOp = String(params.op)
+          const stakeSpends = stakeOp === 'Delegate' || stakeOp === 'Redelegate'
           if (!validator || validator.startsWith('01f2e4')) {
             appendLog('Stake (LIVE): set a real validator public key first — skipped.', 'warn')
+          } else if (stakeSpends && !enforceSpend(Number(params.amount), stakeOp)) {
+            /* blocked by spend limit — skip */
           } else if (
-            await confirmIfNeeded(String(params.op), `${params.amount} CSPR · ${validator.slice(0, 8)}…`)
+            await confirmIfNeeded(stakeOp, `${params.amount} CSPR · ${validator.slice(0, 8)}…`)
           ) {
             appendLog(`${params.op} (LIVE): ${needsApproval ? 'approved — signing…' : signMsg}`, 'info')
-            report(String(params.op), await delegateReal({
+            const stRes = await delegateReal({
               net, senderHex: signerHex, validatorHex: validator,
               amountCspr: Number(params.amount),
-              op: (String(params.op) as 'Delegate' | 'Undelegate' | 'Redelegate') || 'Delegate',
+              op: (stakeOp as 'Delegate' | 'Undelegate' | 'Redelegate') || 'Delegate',
               newValidatorHex: String(params.newValidator || '').trim() || undefined,
-            }))
+            })
+            report(stakeOp, stRes)
+            if (stRes.ok && stakeSpends) recordSpend(Number(params.amount))
           }
         } else if (data.moduleType === 'callcontract') {
           const contract = String(params.contract).trim()
@@ -1874,12 +1944,13 @@ function Flow() {
               )
             }
             const hashes: string[] = []
-            let okAll = !!anchorTo
-            for (let i = 0; anchorTo && i < ids.length; i++) {
+            let okAll = !!anchorTo && enforceSpend(amt * ids.length, 'Attestation anchor')
+            for (let i = 0; okAll && i < ids.length; i++) {
               const res = await sendCsprReal({
                 net, senderHex: signerHex, recipientHex: anchorTo, amountCspr: amt, transferId: ids[i],
               })
               if (res.ok && res.hash) {
+                recordSpend(amt)
                 hashes.push(res.hash)
                 addRecentTx(signerHex, {
                   hash: res.hash, amount: amt, timestamp: new Date().toISOString(), out: true, peer: anchorTo,
@@ -1924,18 +1995,23 @@ function Flow() {
                   ? BigInt(Math.round(Number(params.maxPrice) * 1e9))
                   : undefined,
               pay: async (payTo, motes) => {
+                const cspr = Number(motes) / 1e9
+                if (!enforceSpend(cspr, 'x402 payment')) {
+                  return { ok: false, error: 'blocked by spend limit' }
+                }
                 const rr = await sendCsprReal({
                   net,
                   senderHex: signerHex,
                   recipientHex: payTo,
-                  amountCspr: Number(motes) / 1e9,
+                  amountCspr: cspr,
                 })
+                if (rr.ok) recordSpend(cspr)
                 return { ok: rr.ok, hash: rr.hash, error: rr.error }
               },
               log: (m) => appendLog(`x402: ${m}`, 'info'),
             })
             if (r.paid && r.ok) {
-              appendLog(`✓ x402 paid ${Number(r.amount) / 1e9} CSPR → resource delivered (HTTP ${r.status})`, 'ok')
+              // The payment settled on-chain; expose it for receipts downstream.
               if (r.txHash) {
                 const xurl = explorerTxUrl(net, r.txHash)
                 appendLog(`Settlement tx: ${r.txHash}`, 'info')
@@ -1943,12 +2019,38 @@ function Flow() {
                 bag.txurl = xurl
                 bag.hash = r.txHash
               }
-              if (r.body) {
-                bag.x402body = r.body.slice(0, 500)
-                appendLog(`Resource: ${r.body.slice(0, 160)}`, 'step')
-              }
               bag.x402endpoint = String(params.endpoint || '')
               bag.x402amount = Number(r.amount) / 1e9
+              bag.x402payto = String(r.payTo || '')
+              // ── Response verification: paid ≠ trustworthy. Check the seller
+              // actually delivered before any downstream step consumes it. ──
+              const need = String(params.verifyContains || '').trim()
+              const minLen = Number(params.minLength) || 0
+              const body = r.body || ''
+              const failLen = minLen > 0 && body.length < minLen
+              const failNeed = !!need && !body.includes(need)
+              if (failLen || failNeed) {
+                const why = [
+                  failLen ? `length ${body.length} < ${minLen}` : '',
+                  failNeed ? `missing "${need.slice(0, 40)}"` : '',
+                ].filter(Boolean).join('; ')
+                appendLog(
+                  `🔎 x402 response FAILED verification (${why}) — paid ${Number(r.amount) / 1e9} CSPR but NOT trusting the result. Branch stops.`,
+                  'warn',
+                )
+                bag.verified = 'no'
+                branchStops = true
+              } else {
+                bag.verified = 'yes'
+                appendLog(
+                  `✓ x402 paid ${Number(r.amount) / 1e9} CSPR → resource delivered${need || minLen > 0 ? ' and verified' : ''} (HTTP ${r.status})`,
+                  'ok',
+                )
+                if (r.body) {
+                  bag.x402body = r.body.slice(0, 500)
+                  appendLog(`Resource: ${r.body.slice(0, 160)}`, 'step')
+                }
+              }
               if (walletKey) refreshWalletBalance(walletKey)
             } else if (!r.paid && r.ok) {
               appendLog(`x402: resource was free (HTTP ${r.status}) — no payment needed.`, 'info')
@@ -1959,8 +2061,11 @@ function Flow() {
           }
         } else if (data.moduleType === 'swap') {
           const key = getAgentKey()
+          const swapsCspr = String(params.tokenIn).toUpperCase() === 'CSPR'
           if (!key) {
             appendLog('Swap: connect an autonomous Wallet to sign — skipped.', 'warn')
+          } else if (swapsCspr && !enforceSpend(Number(params.amount), 'Swap')) {
+            /* blocked by spend limit — skip */
           } else if (await confirmIfNeeded('CSPR.trade swap', `${params.amount} ${params.tokenIn} → ${params.tokenOut}`)) {
             appendLog(`Swap: ${params.amount} ${params.tokenIn} → ${params.tokenOut} via CSPR.trade…`, 'info')
             const r = await swapReal({
@@ -1975,6 +2080,7 @@ function Flow() {
               senderPublicHex: signerHex,
             })
             if (r.ok) {
+              if (swapsCspr) recordSpend(Number(params.amount))
               const url = explorerTxUrl(net, r.hash || '')
               appendLog(`✓ REAL swap submitted — ${r.hash}`, 'ok')
               if (r.summary) appendLog(r.summary, 'info')
@@ -1986,18 +2092,128 @@ function Flow() {
               appendLog(`Swap failed: ${r.error}`, 'warn')
             }
           }
+        } else if (data.moduleType === 'deploytoken') {
+          const deployGas = Number(params.payment) || 200
+          if (!enforceSpend(deployGas, 'Token deploy gas')) {
+            /* blocked by spend limit — skip */
+          } else if (await confirmIfNeeded('Deploy token', `${params.symbol} (CEP-18)`)) {
+            appendLog(`Deploying CEP-18 token "${params.name}" (${params.symbol})…`, 'info')
+            const decimals = Number(params.decimals) || 0
+            const baseSupply = (
+              BigInt(Math.round(Number(params.supply) || 0)) *
+              10n ** BigInt(decimals)
+            ).toString()
+            const r = await deployTokenReal({
+              net,
+              senderHex: signerHex,
+              name: String(params.name),
+              symbol: String(params.symbol),
+              decimals,
+              totalSupply: baseSupply,
+              enableMintBurn: String(params.mintable || '').startsWith('Mint'),
+              emitEvents: !String(params.events || '').startsWith('Off'),
+              paymentCspr: Number(params.payment) || 200,
+            })
+            if (r.ok) {
+              recordSpend(deployGas)
+              const url = explorerTxUrl(net, r.hash || '')
+              appendLog(`✓ REAL token deploy submitted — ${r.hash}`, 'ok')
+              appendLog(`View: ${url}`, 'info')
+              bag.txurl = url
+              bag.hash = r.hash || ''
+              bag.symbol = String(params.symbol)
+              if (walletKey) refreshWalletBalance(walletKey)
+            } else {
+              appendLog(`Token deploy failed: ${r.error}`, 'warn')
+            }
+          }
+        } else if (data.moduleType === 'deploynft') {
+          const nftGas = Number(params.payment) || 250
+          const ownership =
+            String(params.ownership).startsWith('Soulbound') ? 1
+            : String(params.ownership).startsWith('Minter') ? 0
+            : 2
+          const minting = String(params.minting).startsWith('Public') ? 1 : 0
+          const metaMut = String(params.metadata).startsWith('Mutable') ? 1 : 0
+          const burn = String(params.burnable).startsWith('No') ? 1 : 0
+          if (!enforceSpend(nftGas, 'NFT collection deploy gas')) {
+            /* blocked by spend limit — skip */
+          } else if (await confirmIfNeeded('Deploy NFT collection', `${params.symbol} (CEP-78)`)) {
+            appendLog(`Deploying CEP-78 collection "${params.name}" (${params.symbol})…`, 'info')
+            const r = await deployNftReal({
+              net,
+              senderHex: signerHex,
+              name: String(params.name),
+              symbol: String(params.symbol),
+              totalSupply: Number(params.supply) || 1000,
+              ownershipMode: ownership,
+              mintingMode: minting,
+              metadataMutability: metaMut,
+              burnMode: burn,
+              allowMinting: true,
+              paymentCspr: nftGas,
+            })
+            if (r.ok) {
+              recordSpend(nftGas)
+              const url = explorerTxUrl(net, r.hash || '')
+              appendLog(`✓ REAL NFT collection deploy submitted — ${r.hash}`, 'ok')
+              appendLog(`View: ${url}`, 'info')
+              bag.txurl = url
+              bag.hash = r.hash || ''
+              bag.symbol = String(params.symbol)
+              if (walletKey) refreshWalletBalance(walletKey)
+            } else {
+              appendLog(`NFT deploy failed: ${r.error}`, 'warn')
+            }
+          }
+        } else if (data.moduleType === 'mintnft') {
+          const mintGas = Number(params.payment) || 5
+          const collection = String(params.collection).trim()
+          if (!collection || collection.includes('{{')) {
+            appendLog('Mint NFT (LIVE): set the collection contract hash (deploy a collection first) — skipped.', 'warn')
+          } else if (!enforceSpend(mintGas, 'NFT mint gas')) {
+            /* blocked by spend limit — skip */
+          } else if (await confirmIfNeeded('Mint NFT', `${params.name} → ${collection.slice(0, 10)}…`)) {
+            appendLog(`Minting NFT "${params.name}"…`, 'info')
+            const metadataJson = JSON.stringify({
+              name: String(params.name),
+              token_uri: String(params.image || ''),
+              checksum: '0'.repeat(64),
+            })
+            const r = await mintNftReal({
+              net,
+              senderHex: signerHex,
+              contractHash: collection,
+              ownerHex: String(params.owner || '').trim(),
+              metadataJson,
+              paymentCspr: mintGas,
+            })
+            if (r.ok) {
+              recordSpend(mintGas)
+              const url = explorerTxUrl(net, r.hash || '')
+              appendLog(`✓ REAL NFT mint submitted — ${r.hash}`, 'ok')
+              appendLog(`View: ${url}`, 'info')
+              bag.txurl = url
+              bag.hash = r.hash || ''
+              bag.nftname = String(params.name)
+              if (walletKey) refreshWalletBalance(walletKey)
+            } else {
+              appendLog(`NFT mint failed: ${r.error}`, 'warn')
+            }
+          }
         } else {
           handled = false
         }
         if (handled) {
           setNodeStatus(id, 'done')
-          currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
+          if (branchStops) appendLog('↳ Branch stops here.', 'warn')
+          else currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
           continue
         }
       }
 
       // If an on-chain action falls through to simulation, say loudly why.
-      if (['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)) {
+      if (['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)) {
         const why = !settingsRef.current.liveExecution
           ? 'turn ON “Execute real transactions” (Settings → Integrations → Casper)'
           : !hasAgentKey() && !walletKey
@@ -2215,13 +2431,26 @@ function Flow() {
   return (
     <div className="app" style={{ ['--ui-scale' as string]: settings.scale }}>
       <HelpHints enabled={settings.help !== false} />
-      <div className="brand">
+      <button
+        className="brand"
+        onClick={() => {
+          // Pan the canvas by the palette width so nodes stay put on screen when
+          // the sidebar collapses/expands (the canvas grows/shrinks on the left).
+          const v = getViewport()
+          setViewport({ ...v, x: v.x + (paletteOpen ? paletteWidth : -paletteWidth) })
+          setPaletteOpen((o) => !o)
+        }}
+        title={paletteOpen ? 'Hide the modules sidebar' : 'Show the modules sidebar'}
+      >
         <Logo size={39} />
         <span className="brand-name">CasperFlow</span>
-      </div>
+      </button>
       <header
-        className="topbar"
-        style={{ paddingLeft: paletteWidth + 26, ['--sidebar-w' as string]: `${paletteWidth}px` }}
+        className={`topbar${paletteOpen ? '' : ' collapsed'}`}
+        style={{
+          paddingLeft: paletteWidth + 26,
+          ['--sidebar-w' as string]: paletteOpen ? `${paletteWidth}px` : '0px',
+        }}
       >
         <div className="topbar-left">
           <WorkspaceBar
@@ -2284,7 +2513,7 @@ function Flow() {
           </button>
           <span className="tb-div" />
           <button
-            className="btn-run btn-icon"
+            className={`btn-run btn-icon${running && !live ? ' active-run' : ''}`}
             onClick={() => {
               setRightTab('log')
               setShowRightPanel(true)
@@ -2292,17 +2521,20 @@ function Flow() {
             }}
             disabled={running || live}
           >
+            {running && !live && <BorderSparks color="#60a5fa" />}
             <Icon name="play" size={13} /> {running && !live ? 'Running…' : 'Run once'}
           </button>
           <button
             className={`btn-primary btn-icon${live ? ' btn-stop' : ''}`}
             onClick={goLive}
           >
+            {live && <BorderSparks color="#f87171" />}
             <Icon name={live ? 'x' : 'zap'} size={13} /> {live ? 'Stop agent' : 'Go live'}
           </button>
         </div>
       </header>
       <div className="main">
+        {paletteOpen && (
         <aside className="palette" style={{ width: paletteWidth }}>
           <input
             className="palette-search"
@@ -2371,10 +2603,13 @@ function Flow() {
           </div>
           <div className="palette-resizer" onMouseDown={startPaletteResize} />
         </aside>
+        )}
         <div
           className="canvas"
           ref={wrapper}
-          style={{ ['--panel-offset' as string]: showRightPanel ? '0px' : `${logWidth / 2}px` }}
+          style={{
+            ['--panel-offset' as string]: `${(showRightPanel ? 0 : logWidth / 2) - (paletteOpen ? 0 : paletteWidth / 2)}px`,
+          }}
           onContextMenuCapture={(e) => {
             e.preventDefault()
             e.stopPropagation()
@@ -2743,12 +2978,15 @@ function Flow() {
       {showConsole && (
         <ConsolePanel
           onClose={() => setShowConsole(false)}
-          leftOffset={paletteWidth}
+          leftOffset={paletteOpen ? paletteWidth : 0}
           rightOffset={showRightPanel ? logWidth : 0}
           height={consoleHeight}
           onHeightChange={setConsoleHeight}
           centerSlot={
-            <div className="console-tools-slot">
+            <div
+              className="console-tools-slot"
+              style={paletteOpen ? undefined : { transform: `translateX(${paletteWidth / 2}px)` }}
+            >
               <div className="canvas-toolbar in-console">{canvasToolbarInner}</div>
             </div>
           }
