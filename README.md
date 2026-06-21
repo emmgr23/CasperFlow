@@ -6,7 +6,7 @@ Drag blocks onto a canvas and connect them, or just describe what you want in pl
 
 Built for the **Casper Agentic Buildathon 2026**.
 
-[🎬 Demo video](https://www.youtube.com/watch?v=qeYvUQhODN0) · [💻 GitHub](https://github.com/emmgr23/CasperFlow) · [📦 MCP server (npm)](https://www.npmjs.com/package/casperflow-mcp)
+[🎬 Demo video](https://www.youtube.com/watch?v=hexnF7Gd9lw) · [💻 GitHub](https://github.com/emmgr23/CasperFlow) · [📦 MCP server (npm)](https://www.npmjs.com/package/casperflow-mcp)
 
 ![CasperFlow visual canvas](Screenshot%202026-06-16%20at%2010.40.10.png)
 
