@@ -90,7 +90,7 @@ export default function RecipientField({
         <input
           type="text"
           className="recip-input"
-          placeholder="02… or 01… public key"
+          placeholder="Enter a public key (02… or 01…)"
           value={to}
           onChange={(e) => setParams({ to: e.target.value.trim() })}
         />

@@ -37,9 +37,14 @@ export interface AiVerdict {
 import { debugLog } from './runtime'
 
 const SYSTEM =
-  'You are the decision engine of an autonomous on-chain agent. ' +
-  'Given a question and live context, answer with a strict JSON object ' +
-  '{"decision": true|false, "reason": "<one short sentence>"}. ' +
+  'You are the decision gate of an autonomous on-chain agent. ' +
+  'You are given a question and the live context the agent has already gathered this run ' +
+  '(on-chain balances and the results of prior steps). ' +
+  'This context is complete and authoritative — decide using ONLY these values. ' +
+  'Do NOT ask for more information and do NOT assume data is missing: if a value appears in the context, treat it as a verified fact. ' +
+  'If the context satisfies the condition in the question, decide true. ' +
+  'Only decide false if the context clearly violates the condition or shows a real risk. ' +
+  'Answer with a strict JSON object {"decision": true|false, "reason": "<one short sentence that cites the deciding value>"}. ' +
   'decision=true means the agent should proceed with its action.'
 
 function parseVerdict(text: string): AiVerdict {
@@ -135,11 +140,16 @@ const BUILDER_GUIDE =
   '- "every N minutes/hours" → schedule (Repeat every); "in N seconds/minutes" → schedule (Once after); "when price drops/rises" → price; "when I receive a transfer" → incoming\n\n' +
   'VARIABLES: results are exposed as {{variables}} you may drop into text params (message, data, title, content). ' +
   'Use ONLY these exact names — NEVER invent new ones:\n' +
-  '{{hash}} = last transaction / settlement hash · {{txurl}} = explorer link / proof link · {{amount}} = last amount · ' +
+  '{{hash}} = last transaction / settlement hash · {{txurl}} = last explorer link / proof link · {{amount}} = last amount · ' +
+  '{{txurls}} = ALL explorer links from a batch of sends (one per line) · {{txhashes}} = all the hashes · {{txlist}} = a readable list of every send (amount → recipient + link) · ' +
+  '{{sentcount}} = number of sends · {{senttotal}} = total CSPR sent · ' +
   '{{price}} = live CSPR price · {{balance}} = wallet balance · {{from}} = sender · {{to}} = recipient · ' +
   '{{symbol}} = token symbol · {{ai}} = the AI decision or summary · {{aidecision}} = YES/NO · {{claimhash}} = attestation hash · ' +
   '{{time}} · {{date}} · {{x402amount}} · {{x402endpoint}}.\n' +
+  'For a BATCH of payments, a "show me all the transactions / links" request → use {{txlist}} (or {{txurls}}), NOT {{hash}}/{{txurl}} (those are only the last one).\n' +
   'So "settlement hash" / "transaction hash" / "tx hash" ALL mean {{hash}}; "proof link" / "explorer link" mean {{txurl}}.\n\n' +
+  'X402 RULE: leave the x402 params verifyContains and minLength EMPTY unless the user explicitly asks to check the response for a SPECIFIC word/phrase. Never guess a generic word like "success", "ok" or "true" — that would reject a valid response.\n' +
+  'RECIPIENT RULE: a transfer\'s `to` may be a saved wallet NAME (e.g. "wallet 3") OR a public key — the app resolves names to keys automatically. So "send 4 CSPR to wallet 3" → {"type":"transfer","params":{"amount":4,"to":"wallet 3"}}. For several recipients, output one transfer step per recipient, in order.\n\n' +
   'EXAMPLES (loose input → correct JSON):\n' +
   'User: "ping me on telegram when cspr drops under 2 cents" → {"name":"CSPR drop alert","steps":[{"type":"price","params":{"mode":"goes below","threshold":0.02}},{"type":"notify","params":{"message":"CSPR dropped to ${{price}}"}}]}\n' +
   'User: "with wallet 3, buy a signal from my paid api and text me the proof link" → {"name":"Signal buyer","steps":[{"type":"wallet","params":{"walletName":"wallet 3"}},{"type":"x402","params":{}},{"type":"notify","params":{"message":"Signal bought · proof {{txurl}}"}}]}\n' +

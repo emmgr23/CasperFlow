@@ -38,27 +38,32 @@ const b64decode = (s) => {
 
 // Poll CSPR.cloud for a transfer to PAY_TO whose deploy hash matches and whose
 // amount covers the price. Returns true once found (or false after the timeout).
-async function verifyOnChain(txHash, { timeoutMs = 20000 } = {}) {
+async function verifyOnChain(txHash, { timeoutMs = 75000 } = {}) {
   const want = String(txHash || '').replace(/^0x/, '').toLowerCase()
   if (!want || !CSPR_CLOUD_KEY || !PAY_TO) return false
   const deadline = Date.now() + timeoutMs
   while (Date.now() < deadline) {
     try {
-      const r = await fetch(`${API_BASE}/accounts/${PAY_TO}/transfers?page=1&page_size=20`, {
+      const r = await fetch(`${API_BASE}/accounts/${PAY_TO}/transfers?page=1&page_size=100`, {
         headers: { authorization: CSPR_CLOUD_KEY, accept: 'application/json' },
       })
       if (r.ok) {
         const j = await r.json()
-        for (const t of j?.data ?? []) {
-          const hash = String(t.deploy_hash ?? '').toLowerCase()
+        const rows = j?.data ?? []
+        for (const t of rows) {
+          // Casper 2.0 indexes the hash as transaction_hash; 1.x as deploy_hash.
+          const hash = String(t.transaction_hash ?? t.deploy_hash ?? '').toLowerCase()
           const amount = BigInt(t.amount ?? 0)
           if (hash === want && amount >= PRICE_MOTES) return true
         }
+        console.log(`  …verifying: ${rows.length} transfers seen for PAY_TO, target not indexed yet`)
+      } else {
+        console.log(`  …verifying: CSPR.cloud HTTP ${r.status} (retrying)`)
       }
     } catch {
       /* retry */
     }
-    await new Promise((r) => setTimeout(r, 2500))
+    await new Promise((r) => setTimeout(r, 8000))
   }
   return false
 }

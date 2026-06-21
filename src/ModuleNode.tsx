@@ -11,7 +11,7 @@ import Icon from './Icon'
 
 // Electric crackle around a node while it executes: a few short lightning arcs
 // hug the card's border and re-shape rapidly, like a brief discharge.
-function NodeSparks({ color }: { color: string }) {
+function NodeSparks({ color, subtle = false }: { color: string; subtle?: boolean }) {
   const ref = useRef<SVGSVGElement>(null)
   const [bolts, setBolts] = useState<string[]>([])
   useEffect(() => {
@@ -19,17 +19,17 @@ function NodeSparks({ color }: { color: string }) {
       const el = ref.current
       const w = el?.clientWidth || 230
       const h = el?.clientHeight || 90
-      const n = 2 + Math.floor(Math.random() * 2)
+      const n = subtle ? 1 : 2 + Math.floor(Math.random() * 2)
       const arcs: string[] = []
-      for (let i = 0; i < n; i++) arcs.push(boltOnBorder(w, h, 8))
+      for (let i = 0; i < n; i++) arcs.push(boltOnBorder(w, h, subtle ? 4 : 8))
       setBolts(arcs)
     }
     crackle()
-    const iv = setInterval(crackle, 90)
+    const iv = setInterval(crackle, subtle ? 150 : 90)
     return () => clearInterval(iv)
-  }, [])
+  }, [subtle])
   return (
-    <svg ref={ref} className="node-sparks" style={{ color }} aria-hidden>
+    <svg ref={ref} className={`node-sparks${subtle ? ' subtle' : ''}`} style={{ color }} aria-hidden>
       {bolts.map((d, i) => (
         <g key={i}>
           <path className="node-bolt-glow" d={d} />
@@ -114,37 +114,32 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
   }
 
   const cardRef = useRef<HTMLDivElement>(null)
-  const startResize = (e: React.MouseEvent) => {
-    e.preventDefault()
-    e.stopPropagation()
-    const startX = e.clientX
-    const startW = cardRef.current?.offsetWidth ?? 230
-    const move = (ev: MouseEvent) => {
-      const w = Math.min(560, Math.max(200, startW + ev.clientX - startX))
-      updateNodeData(id, { width: w })
-    }
-    const up = () => {
-      window.removeEventListener('mousemove', move)
-      window.removeEventListener('mouseup', up)
-    }
-    window.addEventListener('mousemove', move)
-    window.addEventListener('mouseup', up)
-  }
+
+  // "Just materialized by the AI": play a staggered fade+zoom + a brief electric
+  // crackle for ~1.4s after the node was built (data._born = build timestamp,
+  // data._seq = left-to-right order for the cascade delay).
+  // Build animation: a clean fade + light "power-on" flash, staggered left→right.
+  // A base delay lets auto-arrange settle first; no transform → edges stay glued
+  // to the handles. (No electricity here — that's reserved for Run / Go live.)
+  const isBorn = typeof d._born === 'number' && Date.now() - (d._born as number) < 2200
 
   return (
     <div
       ref={cardRef}
-      className={`node-card status-${status}${selected ? ' selected' : ''}`}
+      className={`node-card status-${status}${selected ? ' selected' : ''}${isBorn ? ' node-born' : ''}`}
       style={
         {
           '--node-color': colors.border,
           '--node-bg': colors.bg,
+          ...(isBorn ? { animationDelay: `${400 + (Number(d._seq) || 0) * 120}ms` } : {}),
           ...(typeof d.width === 'number' ? { width: d.width } : {}),
         } as unknown as React.CSSProperties
       }
     >
       {def.category !== 'trigger' && <Handle type="target" position={Position.Left} />}
       {status === 'running' && <NodeSparks color={colors.border} />}
+      {/* A discreet electric "wave" only while the node powers on (build cascade). */}
+      {isBorn && status !== 'running' && <NodeSparks color={colors.border} subtle />}
       {(() => {
         const st = statusOf(d.moduleType)
         // Beta / Soon shown as a little sticker stuck on the top-right corner,
@@ -159,11 +154,17 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
       <div className="node-face node-front" title="Click to edit in the Properties panel">
         <div className="node-title" style={{ color: colors.text }}>
           <Icon name={def.icon} size={17} style={{ color: colors.border, flexShrink: 0 }} />
-          {def.label}
-          {d.moduleType === 'ai' && (
-            <span className="ai-var-pill" title="This AI's answer is available to later steps under this tag">
-              {aiVarName(allNodes, id)}
-            </span>
+          {d.moduleType === 'ai' ? (
+            <>
+              {/* The variable pill (AI, AI2…) replaces the redundant "AI" prefix,
+                  so the title reads "[AI] decision" / "[AI2] decision". */}
+              <span className="ai-var-pill" title="This AI's answer is available to later steps under this tag">
+                {aiVarName(allNodes, id).toUpperCase()}
+              </span>
+              {def.label.replace(/^ai\s+/i, '')}
+            </>
+          ) : (
+            def.label
           )}
           {status === 'running' && <span className="spinner" />}
           {status === 'done' && <Icon name="check" size={15} className="check" />}
@@ -228,7 +229,6 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
       {(def.category !== 'output' || def.type === 'receipt') && (
         <Handle type="source" position={Position.Right} />
       )}
-      <div className="node-resize-grip nodrag" onMouseDown={startResize} title="Drag to resize" />
     </div>
   )
 }

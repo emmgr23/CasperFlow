@@ -465,19 +465,22 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
 
   const testCsprCloud = async () => {
     setCsprStatus('Checking…')
-    if (!settings.csprCloudKey || !settings.watchedAccount) {
-      setCsprStatus('Enter an API key and an account to test')
+    if (!settings.csprCloudKey) {
+      setCsprStatus('Enter an API key to test')
       return
     }
-    const info = await getAccountBalance(
-      settings.casperNet,
-      settings.csprCloudKey,
-      settings.watchedAccount.trim(),
-    )
+    // Validate the key with a lightweight read against a sample account. We use a
+    // saved wallet if there is one, otherwise a well-known network account — the
+    // key isn't bound to any account, this just proves it's accepted.
+    const probe = (
+      loadWalletProfiles()[0]?.publicHex ||
+      '0202f5a90289c14e83f098cd86adf2300dccb058c01a3b50ddb6c8ad26b09b1afc46'
+    ).trim()
+    const info = await getAccountBalance(settings.casperNet, settings.csprCloudKey, probe)
     setCsprStatus(
       info
-        ? `Connected — balance: ${info.balance.toLocaleString('en-US', { maximumFractionDigits: 2 })} CSPR`
-        : 'Failed — check key, account, and network',
+        ? 'Connected — API key is valid ✓'
+        : 'Failed — check the key and network',
     )
   }
 
@@ -676,22 +679,14 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                 onChange={(e) => set({ csprCloudKey: e.target.value })}
               />
             </div>
-            <div className="settings-field">
-              <label>Account to watch (public key)</label>
-              <input
-                type="text"
-                placeholder="0202f5a9…"
-                value={settings.watchedAccount}
-                onChange={(e) => set({ watchedAccount: e.target.value })}
-              />
-            </div>
             <button className="btn-secondary settings-test" onClick={testCsprCloud}>
               Test connection
             </button>
             {csprStatus && <div className="settings-status">{csprStatus}</div>}
             <div className="settings-note">
-              With a key + watched account, the “Balance change” and “Incoming transfer”
-              triggers read real on-chain data. Get a free key at console.cspr.cloud.
+              The key lets CasperFlow read real on-chain data — wallet balances, the
+              spend-limit guardrail and transaction confirmations. Accounts are set on
+              the Wallet node, not here. Get a free key at console.cspr.cloud.
             </div>
 
             <div className="settings-section">Live execution</div>

@@ -150,6 +150,86 @@ export function autoFixGeneratedFlow(nodes: Node[], edges: Edge[]): void {
       data.params[p.key] = fuzzy ?? p.default
     }
   }
+
+  // 5) x402 response check: the LLM sometimes sets verifyContains to a generic
+  //    word like "success" that won't appear in a real response, which would
+  //    reject every valid result. Clear those guesses (the user can set a real
+  //    keyword by hand).
+  const GENERIC_VERIFY = new Set(['success', 'ok', 'true', 'valid', 'done', 'status', '200', 'verified'])
+  for (const n of nodes) {
+    const data = n.data as { moduleType?: string; params?: Params }
+    if (data.moduleType !== 'x402' || !data.params) continue
+    const vc = String(data.params.verifyContains ?? '').trim().toLowerCase()
+    if (vc && GENERIC_VERIFY.has(vc)) data.params.verifyContains = ''
+  }
+
+  // 6) Parallelize sibling transfers. The LLM emits a payroll (or any multi-payout)
+  //    as one long series P → t1 → t2 → … → tk → S. Those are independent payments:
+  //    they should fan OUT from the node before them and fan IN to the node after,
+  //    so they read — and lay out — as parallel branches instead of a chain. We only
+  //    touch 'transfer' nodes so intentional sequences of other actions are untouched.
+  parallelizeTransferRuns(nodes, edges)
+}
+
+// Rewire any maximal simple chain of ≥2 'transfer' nodes into a fan-out / fan-in
+// between the single node before the run and the single node after it. The run
+// engine dedups merge nodes (visited set) and BFS runs every sibling before the
+// merge, so this is execution-safe; tidy() then stacks the siblings in one column.
+function parallelizeTransferRuns(nodes: Node[], edges: Edge[]): void {
+  const typeOf = (id: string) =>
+    (nodes.find((n) => n.id === id)?.data as { moduleType?: string } | undefined)?.moduleType ?? ''
+  const isTransfer = (id: string) => typeOf(id) === 'transfer'
+  const outOf = (id: string) => edges.filter((e) => e.source === id)
+  const inOf = (id: string) => edges.filter((e) => e.target === id)
+
+  const visited = new Set<string>()
+  const runs: string[][] = []
+  for (const n of nodes) {
+    if (!isTransfer(n.id) || visited.has(n.id)) continue
+    const ins = inOf(n.id)
+    const pred = ins.length === 1 ? ins[0].source : null
+    // A run starts at a transfer whose predecessor is not itself a transfer.
+    if (pred && isTransfer(pred)) continue
+    const run: string[] = []
+    let cur: string | null = n.id
+    while (cur && isTransfer(cur) && !visited.has(cur)) {
+      run.push(cur)
+      visited.add(cur)
+      const outs = outOf(cur)
+      if (outs.length !== 1) break
+      const next = outs[0].target
+      cur = isTransfer(next) && inOf(next).length === 1 && !visited.has(next) ? next : null
+    }
+    if (run.length >= 2) runs.push(run)
+  }
+
+  for (const run of runs) {
+    const first = run[0]
+    const last = run[run.length - 1]
+    const preds = inOf(first)
+    const succs = outOf(last)
+    const P = preds.length === 1 ? preds[0].source : null
+    const S = succs.length === 1 ? succs[0].target : null
+    if (!P) continue // need a single upstream gate to fan out from
+    const runSet = new Set(run)
+    const keep = edges.filter((e) => {
+      if (runSet.has(e.source) && runSet.has(e.target)) return false // internal links
+      if (e.source === P && e.target === first) return false // rebuilt as fan-out
+      if (S && e.source === last && e.target === S) return false // rebuilt as fan-in
+      return true
+    })
+    const mk = (s: string, t: string): Edge => ({
+      id: `e${s}-${t}`,
+      source: s,
+      target: t,
+      animated: true,
+      interactionWidth: 14,
+    })
+    for (const t of run) keep.push(mk(P, t)) // fan out
+    if (S) for (const t of run) keep.push(mk(t, S)) // fan in
+    edges.length = 0
+    edges.push(...keep)
+  }
 }
 
 // Build a left-to-right chain (or parallel branches sharing the first trigger).

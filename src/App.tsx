@@ -42,7 +42,7 @@ import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type
 import { buildAttestation } from './attest'
 import { aiVarName } from './aiVars'
 import { fetchCsprPrice, getCsprPrice } from './price'
-import { getAccountBalance, shortKey } from './casper'
+import { getAccountBalance, getRecentTransfers, shortKey } from './casper'
 import Icon from './Icon'
 import Logo from './Logo'
 import PulseEdge from './PulseEdge'
@@ -73,6 +73,15 @@ function findUpstreamWallet(nodeId: string, nodes: Node[], edges: Edge[]): Node 
 }
 
 // Resolve a saved wallet referenced in free text, e.g. "use wallet 3", "the treasury wallet".
+// Tag freshly-built nodes so each "materializes" on screen with a staggered
+// fade+zoom + electric crackle (left-to-right by x position).
+function tagBornNodes(nodes: Node[]): Node[] {
+  const bornAt = Date.now()
+  const order = [...nodes].sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
+  const seq = new Map(order.map((n, i) => [n.id, i]))
+  return nodes.map((n) => ({ ...n, data: { ...n.data, _born: bornAt, _seq: seq.get(n.id) ?? 0 } }))
+}
+
 function pickWalletFromText(text: string): WalletProfile | null {
   const profiles = loadWalletProfiles()
   if (!profiles.length) return null
@@ -96,6 +105,43 @@ function pickWalletFromText(text: string): WalletProfile | null {
   // 3. If only one wallet is saved, default to it.
   if (profiles.length === 1) return profiles[0]
   return null
+}
+
+// Resolve a recipient NAME (what the user typed, e.g. "wallet 3") to a saved
+// wallet profile, tolerating partial names — the profile may be called
+// "wallet 3 genesis time". Name-based ONLY: it never falls back to a positional
+// or default wallet, because a wrong guess would misroute real funds.
+function resolveRecipientWallet(text: string): WalletProfile | null {
+  const profiles = loadWalletProfiles()
+  if (!profiles.length || !text) return null
+  const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, '')
+  const nt = norm(text)
+  if (!nt) return null
+  // 1. Exact normalized name.
+  let m = profiles.find((w) => norm(w.name) === nt)
+  if (m) return m
+  // 2. "wallet N" → a profile whose name contains exactly walletN (so "wallet 1"
+  //    never matches "wallet 12").
+  const wn = nt.match(/wallet(\d+)/)
+  if (wn) {
+    const re = new RegExp('wallet' + wn[1] + '(?!\\d)')
+    m = profiles.find((w) => re.test(norm(w.name)))
+    if (m) return m
+  }
+  // 3. Prefix either way ("wallet3" ⊂ "wallet3genesistime", or vice versa).
+  m = profiles.find(
+    (w) => norm(w.name) && (norm(w.name).startsWith(nt) || nt.startsWith(norm(w.name))),
+  )
+  if (m) return m
+  // 4. Plain substring either way — longest matching profile name wins.
+  let best: WalletProfile | null = null
+  for (const w of profiles) {
+    const nw = norm(w.name)
+    if (nw && (nw.includes(nt) || nt.includes(nw)) && (!best || norm(best.name).length < nw.length)) {
+      best = w
+    }
+  }
+  return best
 }
 
 function profileToWalletParams(p: WalletProfile): Record<string, string> {
@@ -567,6 +613,9 @@ function Flow() {
   const liveRef = useRef(false)
   const lastTick = useRef(0)
   const offlineNotified = useRef(false)
+  // Consecutive live cycles that made no progress (guardrail blocked / errored).
+  // When it reaches AUTO_STOP_AFTER, a "doer" agent stops itself automatically.
+  const noProgressStreak = useRef(0)
   const wakeLock = useRef<{ release: () => Promise<void> } | null>(null)
 
   const acquireWakeLock = async () => {
@@ -1117,6 +1166,7 @@ function Flow() {
       flow.nodes = setWalletParamsOnNodes(flow.nodes, profileToWalletParams(picked))
       debugLog('ai', `Bound wallet "${picked.name}" to the generated Wallet node`)
     }
+    flow.nodes = tagBornNodes(flow.nodes)
     setShowGallery(false)
     const list = snapshotCurrent()
     const id = newId()
@@ -1126,7 +1176,11 @@ function Flow() {
     autoArrange()
     debugLog('ai', `Built "${result.name}" from prompt (${flow.nodes.length} nodes)`)
     setLog([{ t: now(), kind: 'ok', text: `Built "${result.name}" from your description — review the cards and Run.` }])
-    if (!liveRef.current) setGoLivePrompt(true)
+    // Let the build cascade + electric wave finish before the "agent ready"
+    // popup appears (matches the node born window).
+    setTimeout(() => {
+      if (!liveRef.current) setGoLivePrompt(true)
+    }, 2300)
   }
 
   const [cmdValue, setCmdValue] = useState('')
@@ -1211,13 +1265,16 @@ function Flow() {
       if (cp && typeof cp.walletSecret === 'string' && cp.walletSecret) wp = cp as Record<string, string>
     }
     if (picked) debugLog('ai', `Bound wallet "${picked.name}" to the Wallet node`)
-    const boundNodes = setWalletParamsOnNodes(flow.nodes, wp)
+    const boundNodes = tagBornNodes(setWalletParamsOnNodes(flow.nodes, wp))
     setNodes(boundNodes)
     setEdges(decorateEdges(flow.edges))
     autoArrange()
     setCmdValue('')
     appendLog(res.note ? `✓ ${res.note}` : '✓ Workflow updated.', 'ok')
-    if (!liveRef.current) setGoLivePrompt(true)
+    // Let the build cascade + electric wave finish before the popup appears.
+    setTimeout(() => {
+      if (!liveRef.current) setGoLivePrompt(true)
+    }, 2300)
     debugLog('ai', `Edited workflow via command: "${instruction}"`)
   }
 
@@ -1524,10 +1581,22 @@ function Flow() {
     debugLog('run', text) // mirror into the Live console
   }
 
-  const runCycle = async (cycleLabel?: string) => {
-    if (runningRef.current) return
+  // Actions that DO something on-chain (vs. read/monitor steps). Used to tell a
+  // "doer" agent (payroll, DCA) from a pure monitor, for the live auto-stop below.
+  const DOER_TYPES = new Set([
+    'transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft',
+  ])
+
+  // Returns true if the cycle "made progress": a monitor (no doer actions) always
+  // counts as progress; a doer counts only when at least one on-chain action
+  // actually executed. The live loop uses this to auto-stop a guardrail agent that
+  // keeps getting blocked (e.g. treasury fell below the threshold and can't recover).
+  const runCycle = async (cycleLabel?: string): Promise<boolean> => {
+    if (runningRef.current) return true
     runningRef.current = true
     setRunning(true)
+    let flowHasDoer = false
+    let didAct = false
     // try/finally guarantees the agent never freezes if any action throws.
     try {
     if (cycleLabel) {
@@ -1540,6 +1609,9 @@ function Flow() {
 
     const currentNodes = nodesRef.current
     const currentEdges = edgesRef.current
+    flowHasDoer = currentNodes.some((n) =>
+      DOER_TYPES.has((n.data as ModuleNodeData).moduleType),
+    )
     const triggers = currentNodes.filter((n) => {
       const def = moduleByType((n.data as ModuleNodeData).moduleType)
       return def?.category === 'trigger' && !currentEdges.some((e) => e.target === n.id)
@@ -1563,7 +1635,7 @@ function Flow() {
       appendLog('Nothing to run — add an action (and connect it).', 'warn')
       setRunning(false)
       runningRef.current = false
-      return
+      return true
     }
 
     const visited = new Set<string>()
@@ -1579,12 +1651,16 @@ function Flow() {
     if (livePrice !== null) bag.price = livePrice
     if (walletBalance !== null) bag.balance = Number(walletBalance.toFixed(2))
 
-    // If the flow has a Wallet node, it is the source of truth for signing —
-    // reset the active signer so each run reflects the wallet node(s) it runs.
+    // Reset the signer at the start of EVERY run, then restore only a DELIBERATE
+    // Settings agent key (headless autonomous mode). This way a flow signs ONLY
+    // with a Wallet node it actually contains (or that explicit Settings key) —
+    // it never silently reuses a leftover signer or picks a random saved wallet.
     const hasWalletNode = currentNodes.some(
       (n) => (n.data as ModuleNodeData).moduleType === 'wallet',
     )
-    if (hasWalletNode) setActiveSigner(null)
+    setActiveSigner(null)
+    const persistedAgentKey = settingsRef.current.agentKeyPem
+    if (persistedAgentKey) setAgentKeyFromPem(persistedAgentKey)
 
     // For the approval modal's "transaction X of N" counter.
     const totalSignable = currentNodes.filter(
@@ -1601,26 +1677,68 @@ function Flow() {
     let spendCapCspr: number | null = null
     let spendWindow: 'This run' | 'Day' | 'All time' = 'Day'
     let spentThisRun = 0
-    const spendToday = (): number => {
-      const today = new Date().toISOString().slice(0, 10)
-      if (agentMemory.__spendDate !== today) {
-        agentMemory.__spendDate = today
-        agentMemory.__spentToday = 0
+    // The REAL spend baseline: how much the connected wallet has ACTUALLY sent
+    // on-chain for the window (queried from CSPR.cloud when the limit arms). The
+    // cap is measured against this real wallet spending + whatever this run adds —
+    // so it's a true wallet-based limit, not an app-internal counter.
+    let spendBaseline: number | null = null
+    // Fallback only (when there is no CSPR.cloud key / the query fails): a local,
+    // date-keyed counter in localStorage so "per day" still survives reloads.
+    const SPEND_KEY = 'casperflow-spend-v1'
+    const todayStr = () => new Date().toISOString().slice(0, 10)
+    const readSpendRec = (): { date: string; today: number; total: number } => {
+      try {
+        const r = JSON.parse(localStorage.getItem(SPEND_KEY) || '{}')
+        return { date: String(r.date || ''), today: Number(r.today || 0), total: Number(r.total || 0) }
+      } catch {
+        return { date: '', today: 0, total: 0 }
       }
-      return Number(agentMemory.__spentToday || 0)
     }
-    const priorSpend = (): number =>
-      spendWindow === 'This run'
-        ? spentThisRun
-        : spendWindow === 'All time'
-          ? Number(agentMemory.__spentTotal || 0)
-          : spendToday()
+    const writeSpendRec = (r: { date: string; today: number; total: number }) => {
+      try {
+        localStorage.setItem(SPEND_KEY, JSON.stringify(r))
+      } catch {
+        /* storage unavailable — degrade to per-run only */
+      }
+    }
+    const spentToday = (): number => {
+      const r = readSpendRec()
+      if (r.date !== todayStr()) {
+        r.date = todayStr()
+        r.today = 0
+        writeSpendRec(r)
+      }
+      return r.today
+    }
+    // Read the connected wallet's real on-chain outgoing spend for the window.
+    const getWalletSpent = async (account: string): Promise<number | null> => {
+      const key = settingsRef.current.csprCloudKey || ''
+      if (!key || !account) return null
+      const transfers = await getRecentTransfers(settingsRef.current.casperNet, key, account, 100)
+      if (!transfers) return null
+      const today = todayStr()
+      let sum = 0
+      for (const t of transfers) {
+        if (!t.out) continue
+        if (spendWindow === 'Day' && !String(t.timestamp).startsWith(today)) continue
+        sum += t.amount
+      }
+      return sum
+    }
+    const priorSpend = (): number => {
+      if (spendWindow === 'This run') return spentThisRun
+      // Real wallet spend (from chain) + what this run has added but the chain
+      // hasn't indexed yet. Falls back to the local counter if the query failed.
+      if (spendBaseline != null) return spendBaseline + spentThisRun
+      return spendWindow === 'All time' ? readSpendRec().total : spentToday()
+    }
     const enforceSpend = (amountCspr: number, label: string): boolean => {
       if (spendCapCspr == null || !(amountCspr > 0)) return true
       const prior = priorSpend()
       if (prior + amountCspr > spendCapCspr + 1e-9) {
+        const wouldReach = prior + amountCspr
         appendLog(
-          `🛡️ Spend limit reached — ${label} of ${amountCspr} CSPR blocked (cap ${spendCapCspr} CSPR / ${spendWindow.toLowerCase()}, already spent ${prior.toFixed(2)}).`,
+          `🛡️ Spend limit reached — ${label} of ${amountCspr} CSPR blocked. Already spent ${prior.toFixed(2)} CSPR; this would reach ${wouldReach.toFixed(2)} CSPR, over your ${spendCapCspr} CSPR / ${spendWindow.toLowerCase()} cap. Raise the limit above ${wouldReach.toFixed(2)} CSPR to allow it.`,
           'warn',
         )
         bag.spendblocked = (Number(bag.spendblocked) || 0) + 1
@@ -1631,9 +1749,14 @@ function Flow() {
     const recordSpend = (amountCspr: number): void => {
       if (!(amountCspr > 0)) return
       spentThisRun += amountCspr
-      spendToday() // roll the daily bucket to today if needed
-      agentMemory.__spentToday = Number(agentMemory.__spentToday || 0) + amountCspr
-      agentMemory.__spentTotal = Number(agentMemory.__spentTotal || 0) + amountCspr
+      const r = readSpendRec()
+      if (r.date !== todayStr()) {
+        r.date = todayStr()
+        r.today = 0
+      }
+      r.today += amountCspr
+      r.total += amountCspr
+      writeSpendRec(r)
       bag.spendtotalrun = Number(spentThisRun.toFixed(4))
     }
 
@@ -1717,6 +1840,29 @@ function Flow() {
         spendCapCspr = Number(params.max) || 0
         const w = String(params.window || 'Day')
         spendWindow = w === 'This run' || w === 'All time' ? w : 'Day'
+        // Read the connected wallet's REAL on-chain spend for the window, so the
+        // cap is measured against what the wallet has actually sent — a true
+        // wallet-based limit. (Skipped for "This run", which is per-execution.)
+        if (spendWindow !== 'This run') {
+          const wnode = currentNodes.find(
+            (n) => (n.data as ModuleNodeData).moduleType === 'wallet',
+          )
+          const wpub = String(
+            (wnode?.data as ModuleNodeData | undefined)?.params?.walletPublic ||
+              bag.walletpublic ||
+              '',
+          )
+          if (wpub) {
+            const onchain = await getWalletSpent(wpub)
+            if (onchain != null) {
+              spendBaseline = onchain
+              appendLog(
+                `🛡️ Spend limit: wallet has sent ${onchain.toFixed(2)} CSPR on-chain ${spendWindow === 'Day' ? 'today' : 'in total'} (read from chain).`,
+                'info',
+              )
+            }
+          }
+        }
         appendLog(
           `🛡️ Spend limit armed: ≤ ${spendCapCspr} CSPR per ${spendWindow.toLowerCase()} (already spent ${priorSpend().toFixed(2)}). Payments above the cap will be blocked.`,
           'info',
@@ -1774,43 +1920,28 @@ function Flow() {
           )
         }
       }
-      // 2) If there's no Wallet node at all but a wallet is saved, sign with it.
-      if (
-        settingsRef.current.liveExecution &&
-        autoSignRef.current &&
-        !hasWalletNode &&
-        !hasAgentKey() &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
-      ) {
-        const w =
-          loadWalletProfiles().find((x) => x.mode === 'autonomous') || loadWalletProfiles()[0]
-        if (w) {
-          try {
-            const key = await deriveKey(w.format, w.secret, w.algo, w.path)
-            setActiveSigner(key, w.publicHex)
-            appendLog(`Auto-signing with saved wallet "${w.name}" (no popup).`, 'info')
-          } catch (e) {
-            appendLog(
-              `Could not load wallet "${w.name}": ${e instanceof Error ? e.message : 'error'}`,
-              'warn',
-            )
-          }
-        }
-      }
+      // (No silent fallback: a signable action must have a Wallet node connected
+      // to it — or a deliberate Settings agent key. Otherwise it warns + skips,
+      // rather than picking a random saved wallet.)
       // Sign with the autonomous agent key if loaded (no popup), else the wallet.
       const autonomous = hasAgentKey()
       const signerHex = autonomous ? getAgentPublicHex() : walletKey
       const signMsg = autonomous ? 'signing autonomously (no popup)…' : 'confirm in your wallet…'
-      // Don't let a signable action silently fall through to simulation with no signer.
+      // A signable action with NO connected wallet (and no Settings agent key)
+      // must NOT send anything. Warn, mark the node failed, and stop the branch so
+      // no downstream step (e.g. a "done!" notification) runs on a non-action.
       if (
         settingsRef.current.liveExecution &&
         !signerHex &&
         ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
       ) {
         appendLog(
-          `${def.label}: no signing key active — connect a Wallet (Autonomous) upstream, or this action is skipped.`,
+          `${def.label}: no Wallet connected — connect a Wallet node before this action. Nothing was sent.`,
           'warn',
         )
+        setNodeStatus(id, 'error')
+        appendLog('↳ Branch stops here.', 'warn')
+        continue
       }
       if (settingsRef.current.liveExecution && signerHex) {
         const net = settingsRef.current.casperNet
@@ -1846,7 +1977,11 @@ function Flow() {
             if (res.hash) await confirmTx(label, res.hash)
             if (walletKey) refreshWalletBalance(walletKey)
           } else {
+            // Submission failed (cancelled signature, wallet unavailable, RPC error…).
+            // Stop the branch so no downstream step (e.g. a notification) runs.
             appendLog(`${label} (LIVE) failed: ${res.error}`, 'warn')
+            branchStops = true
+            txFailed = true
           }
         }
         // Manual mode → in-app approval dialog, then sign locally. No extension.
@@ -1870,9 +2005,20 @@ function Flow() {
         let branchStops = false
         let txFailed = false
         if (data.moduleType === 'transfer') {
-          const to = String(params.to).trim().replace(/^account-hash-/i, '')
-          const validKey = /^01[0-9a-fA-F]{64}$/.test(to) || /^02[0-9a-fA-F]{66}$/.test(to)
-          const validHash = /^[0-9a-fA-F]{64}$/.test(to) // CSPR.name → account hash
+          let to = String(params.to).trim().replace(/^account-hash-/i, '')
+          const isKey = (s: string) => /^01[0-9a-fA-F]{64}$/.test(s) || /^02[0-9a-fA-F]{66}$/.test(s)
+          const isHash = (s: string) => /^[0-9a-fA-F]{64}$/.test(s) // CSPR.name → account hash
+          // Resolve a saved wallet NAME (e.g. "wallet 3") to its public key, so the
+          // agent can address recipients by name — no need to paste a key.
+          if (to && !isKey(to) && !isHash(to)) {
+            const match = resolveRecipientWallet(to)
+            if (match?.publicHex) {
+              appendLog(`Send CSPR: recipient "${to}" → ${match.name} (${match.publicHex.slice(0, 8)}…).`, 'info')
+              to = match.publicHex
+            }
+          }
+          const validKey = isKey(to)
+          const validHash = isHash(to)
           if (!to || to.startsWith('02c4d6')) {
             appendLog('Send CSPR (LIVE): set a real recipient (key, wallet, or CSPR.name) first — skipped.', 'warn')
           } else if (!validKey && !validHash) {
@@ -1901,10 +2047,15 @@ function Flow() {
                 peer: to,
               })
               // Accumulate real send stats this cycle so downstream AI / Attest / Notify
-              // can reference them: {{sentcount}}, {{senttotal}}, {{amount}}.
+              // can reference them: {{sentcount}}, {{senttotal}}, {{amount}}, and the
+              // FULL list of this batch's hashes/links ({{txhashes}}, {{txurls}}).
               bag.sentcount = (Number(bag.sentcount) || 0) + 1
               bag.senttotal = Number(((Number(bag.senttotal) || 0) + Number(params.amount)).toFixed(4))
               bag.amount = Number(params.amount)
+              const thisUrl = explorerTxUrl(net, txRes.hash || '')
+              bag.txhashes = `${bag.txhashes ? `${bag.txhashes}\n` : ''}${txRes.hash || ''}`
+              bag.txurls = `${bag.txurls ? `${bag.txurls}\n` : ''}${thisUrl}`
+              bag.txlist = `${bag.txlist ? `${bag.txlist}\n` : ''}• ${Number(params.amount)} CSPR → ${to.slice(0, 10)}… · ${thisUrl}`
             }
           }
         } else if (data.moduleType === 'stake') {
@@ -2088,6 +2239,8 @@ function Flow() {
               if (r.body) bag.x402body = r.body.slice(0, 500)
             } else {
               appendLog(`x402 ${r.paid ? 'payment' : 'request'} issue: ${r.error || 'HTTP ' + r.status}`, 'warn')
+              branchStops = true
+              txFailed = true
             }
           }
         } else if (data.moduleType === 'swap') {
@@ -2122,6 +2275,8 @@ function Flow() {
               if (r.hash) await confirmTx('Swap', r.hash)
             } else {
               appendLog(`Swap failed: ${r.error}`, 'warn')
+              branchStops = true
+              txFailed = true
             }
           }
         } else if (data.moduleType === 'deploytoken') {
@@ -2158,6 +2313,8 @@ function Flow() {
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`Token deploy failed: ${r.error}`, 'warn')
+              branchStops = true
+              txFailed = true
             }
           }
         } else if (data.moduleType === 'deploynft') {
@@ -2198,6 +2355,8 @@ function Flow() {
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`NFT deploy failed: ${r.error}`, 'warn')
+              branchStops = true
+              txFailed = true
             }
           }
         } else if (data.moduleType === 'mintnft') {
@@ -2234,16 +2393,19 @@ function Flow() {
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`NFT mint failed: ${r.error}`, 'warn')
+              branchStops = true
+              txFailed = true
             }
           }
         } else {
           handled = false
         }
         if (handled) {
+          if (!txFailed && !branchStops) didAct = true
           setNodeStatus(id, txFailed ? 'error' : 'done')
           if (branchStops) {
             appendLog(
-              txFailed ? '↳ Branch stops — the transaction failed on-chain.' : '↳ Branch stops here.',
+              txFailed ? '↳ Branch stops — the transaction did not go through.' : '↳ Branch stops here.',
               'warn',
             )
           } else {
@@ -2304,6 +2466,8 @@ function Flow() {
         appendLog('↳ Branch stops here.', 'warn')
         continue
       }
+      // A doer action that ran (incl. in simulation) counts as real progress.
+      if (DOER_TYPES.has(data.moduleType)) didAct = true
       currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
     }
 
@@ -2314,6 +2478,8 @@ function Flow() {
       setRunning(false)
       runningRef.current = false
     }
+    // Monitors always "progress"; doers progress only when they actually acted.
+    return !flowHasDoer || didAct
   }
 
   const stopLive = () => {
@@ -2377,6 +2543,7 @@ function Flow() {
     cycleCount.current = 0
     lastTick.current = 0
     offlineNotified.current = false
+    noProgressStreak.current = 0
     acquireWakeLock()
     debugLog('live', `Agent started — ${bannerLabel}`)
     setLog([
@@ -2408,7 +2575,21 @@ function Flow() {
       lastTick.current = nowMs
       setLiveSchedule({ lastTickMs: nowMs })
       cycleCount.current += 1
-      runCycle(`Cycle ${cycleCount.current}`)
+      runCycle(`Cycle ${cycleCount.current}`).then((progressed) => {
+        if (!liveRef.current) return
+        // A doer agent that keeps getting blocked (e.g. treasury dropped below the
+        // guardrail and can't recover) would otherwise loop forever. After a few
+        // no-progress cycles in a row, stop the agent automatically.
+        const AUTO_STOP_AFTER = 3
+        noProgressStreak.current = progressed ? 0 : noProgressStreak.current + 1
+        if (noProgressStreak.current >= AUTO_STOP_AFTER) {
+          appendLog(
+            `Auto-stopped — ${AUTO_STOP_AFTER} cycles in a row were blocked before any on-chain action (the guardrail keeps stopping the run, and nothing it does will change that). Restart manually once conditions change.`,
+            'info',
+          )
+          stopLive()
+        }
+      })
     }
     if (runOnce) {
       // One-shot: wait the delay, fire a single cycle, then stop.
@@ -2834,6 +3015,8 @@ function Flow() {
             elementsSelectable={!locked}
             zoomOnDoubleClick={false}
             connectionRadius={32}
+            minZoom={0.15}
+            maxZoom={2.5}
             fitView
             deleteKeyCode={['Backspace', 'Delete']}
             proOptions={{ hideAttribution: true }}
@@ -2857,6 +3040,7 @@ function Flow() {
             )}
           </ReactFlow>
           <div className="ai-cmdbar">
+            {cmdBusy && <BorderSparks color="#a78bfa" />}
             <textarea
               ref={cmdRef}
               className="ai-cmdbar-input"

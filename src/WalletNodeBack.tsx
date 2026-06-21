@@ -41,7 +41,7 @@ export default function WalletNodeBack({ id, params }: { id: string; params: Par
   const activeId = String(params.walletProfileId || '')
   const active = profiles.find((p) => p.id === activeId)
   const pk = active?.publicHex || ''
-  const { balance, transfers, loading, error, refresh } = useWalletLive(pk, true)
+  const { balance, transfers, loading, error, errorLabel, refresh } = useWalletLive(pk, true)
 
   const setP = (patch: Params) => updateNodeData(id, { params: { ...params, ...patch } })
 
@@ -94,7 +94,7 @@ export default function WalletNodeBack({ id, params }: { id: string; params: Par
         <div className="wallet-bal-summary">
           <div className="wallet-bal-row">
             <span className={`wallet-balance-big${balance === null && error ? ' err' : ''}`}>
-              {balance !== null ? fmtCspr(balance) : loading ? 'Loading…' : error ? 'connection error' : '—'}
+              {balance !== null ? fmtCspr(balance) : loading ? 'Loading…' : error ? errorLabel : '—'}
             </span>
             <button className="wallet-refresh-mini" onClick={refresh} disabled={loading} title="Refresh now">
               <Icon name="rotate" size={13} />

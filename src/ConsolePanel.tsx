@@ -52,11 +52,57 @@ export default function ConsolePanel({
   const entries = getDebugLog()
 
   const [copied, setCopied] = useState(false)
+  // Copy all has been stubborn. Two real culprits were at play:
+  //  1) awaiting the async Clipboard API first drops the click's user-activation,
+  //     so the execCommand fallback then also fails;
+  //  2) this is a node-editor — `user-select:none` is set on parts of the tree,
+  //     and a textarea that inherits it CANNOT be selected, so execCommand copies
+  //     nothing. We fix both: force `user-select:text` on the textarea, run the
+  //     synchronous path first, fire the async API without awaiting, and as a last
+  //     resort fall back to a prompt so the user can always copy by hand. We also
+  //     log which path failed so the live console tells us if it ever breaks again.
   const copyAll = () => {
-    const text = entries.map((e) => `[${e.t}] ${e.tag}: ${e.msg}`).join('\n')
-    navigator.clipboard?.writeText(text || 'No log entries.')
-    setCopied(true)
-    setTimeout(() => setCopied(false), 1500)
+    const text = entries.map((e) => `[${e.t}] ${e.tag}: ${e.msg}`).join('\n') || 'No log entries.'
+    const flash = () => {
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    }
+
+    // Path 1 — synchronous textarea + execCommand, inside the click gesture.
+    let execOk = false
+    try {
+      const ta = document.createElement('textarea')
+      ta.value = text
+      ta.setAttribute('readonly', '')
+      ta.style.cssText =
+        'position:fixed;top:0;left:0;width:1px;height:1px;padding:0;border:0;margin:0;' +
+        'opacity:0;z-index:2147483647;user-select:text;-webkit-user-select:text;'
+      document.body.appendChild(ta)
+      ta.focus({ preventScroll: true })
+      ta.select()
+      ta.setSelectionRange(0, text.length)
+      execOk = document.execCommand('copy')
+      document.body.removeChild(ta)
+    } catch (err) {
+      console.warn('[copyAll] execCommand path threw:', err)
+    }
+    if (execOk) {
+      flash()
+      return
+    }
+
+    // Path 2 — modern Clipboard API (needs a secure context: https or localhost).
+    if (navigator.clipboard?.writeText) {
+      navigator.clipboard.writeText(text).then(flash).catch((err) => {
+        console.warn('[copyAll] clipboard API failed:', err?.message || err)
+        window.prompt('Copy the log (Cmd/Ctrl+C, then Enter):', text)
+      })
+      return
+    }
+
+    // Path 3 — last resort the user can always finish by hand.
+    console.warn('[copyAll] no Clipboard API (insecure context?) and execCommand failed — prompt fallback')
+    window.prompt('Copy the log (Cmd/Ctrl+C, then Enter):', text)
   }
 
   return (

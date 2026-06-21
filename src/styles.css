@@ -52,6 +52,10 @@
   fill: none; stroke: #ffffff; stroke-width: 1.3;
   stroke-linecap: round; stroke-linejoin: round;
 }
+/* Softer crackle used only for the build "wave" (thinner, dimmer than a run). */
+.node-sparks.subtle { opacity: 0.5; }
+.node-sparks.subtle .node-bolt-glow { stroke-width: 2; opacity: 0.4; }
+.node-sparks.subtle .node-bolt-core { stroke-width: 0.9; opacity: 0.7; }
 
 /* Thin electric crackle around a running button (Run once / Go live) */
 .btn-sparks {
@@ -170,7 +174,7 @@ body {
 /* Pinned quick-switch tabs — ghost; the active one is softly highlighted */
 .ws-pins {
   display: flex; align-items: center; gap: 1px; flex: 1; min-width: 90px;
-  min-height: 27px; overflow: hidden;
+  min-height: 27px; overflow: visible;
   margin-left: 5px; padding-left: 7px;
   border-left: 1px solid rgba(255, 255, 255, 0.08);
 }
@@ -192,13 +196,16 @@ body {
 .ws-pin.active .ws-pin-num { background: rgba(167, 139, 250, 0.28); color: #ddd6fe; }
 .ws-pin-name { max-width: 110px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 500; }
 .ws-pin-x {
-  position: absolute; top: -6px; right: -6px;
-  width: 14px; height: 14px; line-height: 12px; text-align: center;
-  background: #1e2438; border: 1px solid rgba(255, 255, 255, 0.18);
-  border-radius: 50%; font-size: 11px; color: #f87171; opacity: 0;
+  position: absolute; top: -7px; right: -7px; z-index: 6;
+  width: 19px; height: 19px; line-height: 17px; text-align: center;
+  background: #1e2438; border: 1px solid rgba(255, 255, 255, 0.2);
+  border-radius: 50%; font-size: 13px; color: #f87171; opacity: 0;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.45);
+  transition: opacity 0.12s, background 0.12s;
 }
-.ws-pin:hover .ws-pin-x { opacity: 1; }
-.ws-pin-x:hover { background: rgba(248, 113, 113, 0.25); }
+.ws-pin:hover .ws-pin-x,
+.ws-pin.active .ws-pin-x { opacity: 1; }
+.ws-pin-x:hover { background: rgba(248, 113, 113, 0.3); color: #fecaca; }
 .ws-pin-drop {
   display: inline-flex; align-items: center; justify-content: center;
   height: 27px; padding: 0 12px; border-radius: 8px;
@@ -528,6 +535,18 @@ body {
   width: calc(232px * var(--ui-scale, 1));
   font-size: calc(13px * var(--ui-scale, 1));
   transition: width 0.35s cubic-bezier(0.4, 0.2, 0.2, 1);
+}
+/* "Power-on" animation when the AI just built the node: a fade + a soft glow
+   flash in the node's colour, staggered left→right via an inline animation-delay.
+   No transform → the handles don't move, so the wires stay glued to them.
+   `both` keeps the node hidden until its turn (clean cascade). */
+.node-card.node-born {
+  animation: nodeBorn 0.5s ease-out both;
+}
+@keyframes nodeBorn {
+  0%   { opacity: 0; box-shadow: 0 0 0 0 transparent; }
+  45%  { opacity: 1; box-shadow: 0 0 24px 2px color-mix(in srgb, var(--node-color) 55%, transparent); }
+  100% { opacity: 1; box-shadow: 0 0 0 0 transparent; }
 }
 .react-flow__node:has(.node-card.flipped) { z-index: 50 !important; }
 .node-resize-grip {
@@ -921,6 +940,9 @@ body {
   border-color: rgba(167, 139, 250, 0.5);
   box-shadow: 0 10px 34px rgba(0, 0, 0, 0.42), 0 0 0 3px rgba(167, 139, 250, 0.12);
 }
+/* While the AI is building: a discreet electric crackle around the bar (dimmer
+   than the Run / Go live electricity). */
+.ai-cmdbar .btn-sparks { inset: -2px; width: calc(100% + 4px); height: calc(100% + 4px); opacity: 0.6; }
 .ai-cmdbar-input {
   flex: 1; background: none; border: none; outline: none;
   font-size: 14px; color: #e2e8f0; font-family: inherit;
@@ -969,8 +991,9 @@ body {
 }
 .canvas-toolbar .toolbar-console span { white-space: nowrap; }
 .canvas-toolbar .toolbar-active {
-  background: rgba(224, 73, 47, 0.2);
-  color: #fca5a5;
+  background: rgba(139, 92, 246, 0.22);
+  color: #c4b5fd;
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.35);
 }
 .canvas-toolbar .toolbar-danger:hover { background: rgba(248, 113, 113, 0.15); color: #f87171; }
 .toolbar-sep {

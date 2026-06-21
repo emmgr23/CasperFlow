@@ -528,12 +528,18 @@ export const MODULES: ModuleDef[] = [
         const price = getCsprPrice()
         const upstream = ctx.vars
           ? Object.entries(ctx.vars)
-              .map(([k, v]) => `${k}=${v}`)
-              .join(', ')
+              .filter(([k]) => !k.startsWith('_'))
+              .map(([k, v]) => `${k} = ${v}`)
+              .join('; ')
           : ''
+        // Lead with the on-chain facts the agent already gathered (balances,
+        // prior-step results). The CSPR price is only a side reference — putting
+        // it first made the model fixate on it and refuse for "lack of context".
         const context =
-          `Live CSPR price: ${price !== null ? '$' + price : 'unknown'}. ` +
-          `Upstream values from this run (these reflect actions THIS agent already executed): ${upstream || 'none'}.`
+          (upstream
+            ? `On-chain facts this agent already gathered this run (authoritative, treat as verified): ${upstream}.`
+            : 'No prior values were gathered before this step.') +
+          (price !== null ? ` (Reference only — CSPR market price: $${price}.)` : '')
         // ── Generate text mode: produce the requested text (e.g. a summary) ──
         if (generate) {
           const text = await askText(
@@ -1377,13 +1383,13 @@ export const MODULES: ModuleDef[] = [
     category: 'payments',
     icon: 'send',
     params: [
-      { key: 'to', label: 'Recipient (public key)', type: 'text', default: '02c4d6…a1b9' },
-      { key: 'amount', label: 'Amount', type: 'number', default: 50, suffix: 'CSPR' },
+      { key: 'to', label: 'Recipient (public key)', type: 'text', default: '' },
+      { key: 'amount', label: 'Amount', type: 'number', default: 0, suffix: 'CSPR' },
       { key: 'transferId', label: 'Transfer ID (memo)', type: 'number', default: 0, advanced: true },
       { key: 'gasPayment', label: 'Gas payment', type: 'number', default: 0.1, suffix: 'CSPR', advanced: true },
       { key: 'minBalance', label: 'Only if balance ≥', type: 'number', default: 0, suffix: 'CSPR', advanced: true },
     ],
-    describe: (p) => `${p.amount} CSPR → ${String(p.to).slice(0, 8)}…`,
+    describe: (p) => `${p.amount} CSPR → ${p.to ? `${String(p.to).slice(0, 8)}…` : 'recipient'}`,
     simulate: (p) => {
       const memo = Number(p.transferId) > 0 ? `, transfer-id ${p.transferId}` : ''
       return {

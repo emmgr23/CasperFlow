@@ -55,7 +55,7 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
   const insertVars = [
     ...aiVars,
     'balance', 'sentcount', 'senttotal', 'price', 'amount', 'net', 'time', 'date',
-    'hash', 'txurl', 'claimhash', 'symbol',
+    'hash', 'txurl', 'txurls', 'txhashes', 'txlist', 'claimhash', 'symbol',
     'x402body', 'x402endpoint', 'x402amount',
   ]
 

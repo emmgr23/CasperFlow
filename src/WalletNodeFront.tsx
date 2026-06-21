@@ -38,7 +38,7 @@ export default function WalletNodeFront({ id, params }: { id: string; params: Pa
   const activeId = String(params.walletProfileId || '')
   const active = profiles.find((p) => p.id === activeId)
   const pk = active?.publicHex || ''
-  const { balance, transfers, loading, error } = useWalletLive(pk, showTx)
+  const { balance, transfers, loading, error, errorLabel } = useWalletLive(pk, showTx)
   const hasError = balance === null && !!error
 
   const selectProfile = (p: WalletProfile) =>
@@ -111,7 +111,7 @@ export default function WalletNodeFront({ id, params }: { id: string; params: Pa
             {balance !== null
               ? fmtCspr(balance)
               : hasError
-                ? 'connection error'
+                ? errorLabel
                 : loading
                   ? 'connecting…'
                   : '—'}

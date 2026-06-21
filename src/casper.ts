@@ -21,10 +21,27 @@ export interface AccountInfo {
   publicKey: string
 }
 
+// Classify a failed CSPR.cloud read so the UI can show the REAL problem
+// (rate limit vs key rejected vs unfunded vs offline) instead of a vague error.
+export type CsprErrorKind = 'rate-limit' | 'auth' | 'not-found' | 'network' | 'unknown'
+export interface CsprError {
+  status: number
+  kind: CsprErrorKind
+}
+const classifyStatus = (status: number): CsprErrorKind =>
+  status === 429
+    ? 'rate-limit'
+    : status === 401 || status === 403
+      ? 'auth'
+      : status === 404
+        ? 'not-found'
+        : 'unknown'
+
 export async function getAccountBalance(
   net: CasperNet,
   apiKey: string,
   publicKey: string,
+  onError?: (e: CsprError) => void,
 ): Promise<AccountInfo | null> {
   if (!apiKey || !publicKey) return null
   try {
@@ -32,8 +49,11 @@ export async function getAccountBalance(
       headers: { authorization: apiKey, accept: 'application/json' },
     })
     if (!r.ok) {
-      // 404 = account not seen on-chain yet (unfunded) — that's normal, stay quiet.
-      if (r.status !== 404) debugLog('casper', `Balance read failed: HTTP ${r.status} (${net})`)
+      // 404 = account not seen on-chain yet (unfunded); 429 = transient rate-limit
+      // from CSPR.cloud — both are normal, stay quiet so the log isn't spammed.
+      if (r.status !== 404 && r.status !== 429)
+        debugLog('casper', `Balance read failed: HTTP ${r.status} (${net})`)
+      onError?.({ status: r.status, kind: classifyStatus(r.status) })
       return null
     }
     const j = await r.json()
@@ -42,6 +62,7 @@ export async function getAccountBalance(
     return { balance: Number(raw) / MOTES, publicKey }
   } catch (e) {
     debugLog('casper', `Balance read error: ${e instanceof Error ? e.message : 'network/CORS'}`)
+    onError?.({ status: 0, kind: 'network' })
     return null
   }
 }
@@ -135,7 +156,7 @@ export async function getRecentTransfers(
       headers: { authorization: apiKey, accept: 'application/json' },
     })
     if (!r.ok) {
-      if (r.status !== 404) debugLog('casper', `Transfers read failed: HTTP ${r.status}`)
+      if (r.status !== 404 && r.status !== 429) debugLog('casper', `Transfers read failed: HTTP ${r.status}`)
       return null
     }
     const j = await r.json()

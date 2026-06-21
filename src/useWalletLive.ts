@@ -1,6 +1,28 @@
 import { useCallback, useEffect, useState } from 'react'
-import { getAccountBalance, getRecentTransfers, type Transfer, type CasperNet } from './casper'
+import { getAccountBalance, getRecentTransfers, type Transfer, type CasperNet, type CsprError } from './casper'
 import { getRecentTxs, prunePendingTx, subscribeRuntime } from './runtime'
+
+// Turn a CSPR.cloud failure into a short label (for the node) + a full message.
+function describeCsprError(e: CsprError | null): { label: string; message: string } {
+  switch (e?.kind) {
+    case 'rate-limit':
+      return {
+        label: 'rate limited',
+        message: 'CSPR.cloud rate limit (HTTP 429) — too many requests. It recovers on its own in a moment.',
+      }
+    case 'auth':
+      return {
+        label: 'key rejected',
+        message: `CSPR.cloud rejected the key (HTTP ${e.status}) — check it in Settings, or the free quota may be used up.`,
+      }
+    case 'not-found':
+      return { label: 'unfunded', message: 'This account is not on-chain yet — fund it via the faucet.' }
+    case 'network':
+      return { label: 'offline', message: 'Network / proxy error — is the dev server running and online?' }
+    default:
+      return { label: 'read error', message: 'Could not read balance — check the CSPR.cloud key & network.' }
+  }
+}
 
 // Reads the CSPR.cloud key + network straight from saved settings so node
 // components can fetch live data without prop-drilling.
@@ -20,6 +42,7 @@ export function useWalletLive(publicHex: string, withTransfers = false) {
   const [transfers, setTransfers] = useState<Transfer[] | null>(null)
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
+  const [errorLabel, setErrorLabel] = useState('')
   const [, force] = useState(0)
 
   // Re-render when a transaction is submitted (to show it instantly as pending).
@@ -33,12 +56,18 @@ export function useWalletLive(publicHex: string, withTransfers = false) {
       return
     }
     setLoading(true)
-    const info = await getAccountBalance(net, key, publicHex)
+    let errInfo: CsprError | null = null
+    const info = await getAccountBalance(net, key, publicHex, (e) => {
+      errInfo = e
+    })
     if (info) {
       setBalance(info.balance)
       setError('')
+      setErrorLabel('')
     } else {
-      setError('Could not read balance — check the CSPR.cloud key & network.')
+      const d = describeCsprError(errInfo)
+      setError(d.message)
+      setErrorLabel(d.label)
     }
     if (withTransfers) {
       const t = await getRecentTransfers(net, key, publicHex, 10)
@@ -57,7 +86,9 @@ export function useWalletLive(publicHex: string, withTransfers = false) {
       return
     }
     refresh()
-    const idv = setInterval(refresh, 8_000)
+    // 20s keeps the balance fresh without hammering CSPR.cloud (avoids 429s,
+    // especially right after a run that already made many on-chain reads).
+    const idv = setInterval(refresh, 20_000)
     return () => clearInterval(idv)
   }, [publicHex, refresh])
 
@@ -72,5 +103,5 @@ export function useWalletLive(publicHex: string, withTransfers = false) {
     }
   }
 
-  return { balance, transfers: merged, loading, error, refresh }
+  return { balance, transfers: merged, loading, error, errorLabel, refresh }
 }
