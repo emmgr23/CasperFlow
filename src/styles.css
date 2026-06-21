@@ -606,6 +606,38 @@ body {
 }
 .var-chip:hover { background: rgba(167, 139, 250, 0.26); color: #ddd6fe; }
 
+/* Inline variable pills — shown read-only on cards, and inside editable fields. */
+.var-token {
+  display: inline-flex; align-items: center;
+  padding: 1px 7px; margin: 0 1px;
+  border-radius: 6px;
+  font-size: 0.9em; font-weight: 600; line-height: 1.35;
+  font-family: 'SF Mono', Menlo, monospace;
+  background: rgba(167, 139, 250, 0.16);
+  color: #c4b5fd;
+  border: 1px solid rgba(167, 139, 250, 0.32);
+  white-space: nowrap; vertical-align: baseline;
+  user-select: none;
+}
+/* Editable field (contenteditable) that renders {{var}} as pills. */
+.var-input {
+  width: 100%; font-size: 13.5px; line-height: 1.7;
+  padding: 6px 2px; color: #e2e8f0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 0; transition: border-color 0.12s;
+  cursor: text; white-space: nowrap; overflow-x: auto;
+  min-height: 1.7em;
+}
+.var-input::-webkit-scrollbar { height: 0; }
+.var-input-multi {
+  white-space: pre-wrap; word-break: break-word; overflow-x: hidden;
+  min-height: 80px; line-height: 1.55;
+}
+.var-input:focus { outline: none; border-bottom-color: rgba(167, 139, 250, 0.65); }
+.var-input:empty::before {
+  content: attr(data-placeholder); color: #4b5563; pointer-events: none;
+}
+
 .node-card.status-running .node-face {
   box-shadow: 0 0 30px color-mix(in srgb, var(--node-color) 45%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
@@ -613,9 +645,21 @@ body {
 .node-card.status-done .node-face {
   border-color: rgba(45, 212, 191, 0.6);
 }
+.node-card.status-error .node-face {
+  border-color: rgba(248, 113, 113, 0.65);
+  box-shadow: 0 0 18px rgba(248, 113, 113, 0.28), inset 0 1px 0 rgba(255, 255, 255, 0.05);
+}
+.xmark { color: #f87171; margin-left: auto; flex-shrink: 0; filter: drop-shadow(0 0 4px rgba(248,113,113,0.7)); }
 /* Kill React Flow's default boxy selection outline. */
 .react-flow__node.selected { outline: none !important; box-shadow: none !important; }
 .react-flow__node:focus, .react-flow__node:focus-visible { outline: none !important; }
+/* Multi-select bounding box: hide the blue rectangle — the green glow on each
+   selected node is enough. Kept transparent (not removed) so the selected group
+   can still be dragged together. */
+.react-flow__nodesselection-rect {
+  background: transparent !important;
+  border: none !important;
+}
 /* Discreet, diffuse green selection glow. */
 .react-flow__node.selected .node-face {
   border-color: rgba(74, 222, 128, 0.5);
@@ -689,14 +733,22 @@ body {
   font-size: calc(10.5px * var(--ui-scale, 1)); color: #64748b;
   font-family: 'SF Mono', Menlo, monospace;
 }
-.status-pill {
-  position: absolute; top: calc(11px * var(--ui-scale, 1)); right: calc(34px * var(--ui-scale, 1));
-  font-size: calc(9px * var(--ui-scale, 1)); font-weight: 600; letter-spacing: 0.5px;
-  padding: 1px 7px; border-radius: 6px; text-transform: uppercase;
+/* Little label stuck on the top-right corner of the card, poking out slightly. */
+.status-sticker {
+  position: absolute;
+  top: calc(-8px * var(--ui-scale, 1));
+  right: calc(-6px * var(--ui-scale, 1));
+  z-index: 6;
+  font-size: calc(8.5px * var(--ui-scale, 1)); font-weight: 700; letter-spacing: 0.6px;
+  padding: 2px 8px; border-radius: 7px; text-transform: uppercase;
+  box-shadow: 0 3px 9px rgba(0, 0, 0, 0.5);
+  border: 1px solid rgba(0, 0, 0, 0.22);
+  pointer-events: none;
 }
-.status-live { background: rgba(74, 222, 128, 0.16); color: #86efac; }
-.status-beta { background: rgba(251, 191, 36, 0.16); color: #fcd34d; }
-.status-soon { background: rgba(148, 163, 184, 0.16); color: #94a3b8; }
+/* Opaque, solid status labels (read as deliberate stickers, not washed out). */
+.status-live { background: #4ade80; color: #052e16; }
+.status-beta { background: #fbbf24; color: #251a00; }
+.status-soon { background: #94a3b8; color: #14202e; }
 .check { color: #2dd4bf; margin-left: auto; filter: drop-shadow(0 0 4px rgba(45,212,191,0.7)); flex-shrink: 0; }
 .spinner {
   width: 11px; height: 11px; border: 2px solid rgba(255, 255, 255, 0.15);
@@ -1390,6 +1442,11 @@ body {
   color: #cbd5e1; border-radius: 7px; padding: 5px 9px; font-size: 12px; cursor: pointer;
 }
 .console-actions button:hover { background: rgba(255, 255, 255, 0.1); }
+.console-actions button.copied {
+  background: rgba(74, 222, 128, 0.16);
+  border-color: rgba(74, 222, 128, 0.5);
+  color: #86efac;
+}
 .console-body {
   flex: 1; overflow-y: auto; padding: 8px 10px;
   font-family: ui-monospace, 'SF Mono', Menlo, monospace; font-size: 12px; line-height: 1.55;
@@ -1583,11 +1640,11 @@ body {
 /* ── "Go live?" prompt after AI builds an agent ──────────── */
 .golive-prompt {
   position: fixed; top: 38%; left: 50%; transform: translateX(-50%); z-index: 80;
-  display: flex; flex-direction: column; gap: 12px; width: 380px;
+  display: flex; flex-direction: column; gap: 16px; width: 430px;
   background: rgba(17, 22, 38, 0.97); backdrop-filter: blur(16px);
-  border: 1px solid rgba(124, 77, 255, 0.45);
-  border-radius: 16px; padding: 16px 18px;
-  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.55);
+  border: 1px solid rgba(124, 77, 255, 0.4);
+  border-radius: 18px; padding: 22px 24px;
+  box-shadow: 0 22px 60px rgba(0, 0, 0, 0.55);
   animation: golivePop 0.22s ease-out;
 }
 .golive-prompt-row { display: flex; align-items: center; gap: 14px; }
@@ -1610,7 +1667,6 @@ body {
 .gst-label { display: flex; flex-direction: column; line-height: 1.3; }
 .gst-label strong { font-size: 13px; color: #e2e8f0; }
 .gst-label span { font-size: 11.5px; color: #94a3b8; }
-.golive-prompt-actions { display: flex; gap: 8px; justify-content: flex-end; }
 @keyframes golivePop {
   from { opacity: 0; transform: translate(-50%, -8px); }
   to { opacity: 1; transform: translate(-50%, 0); }
@@ -1623,7 +1679,12 @@ body {
 .golive-prompt-text { display: flex; flex-direction: column; line-height: 1.35; }
 .golive-prompt-text strong { font-size: 14px; color: #e2e8f0; }
 .golive-prompt-text span { font-size: 12.5px; color: #94a3b8; }
-.golive-prompt-actions { display: flex; gap: 8px; margin-left: 6px; }
+.golive-prompt-actions { display: flex; align-items: center; gap: 10px; margin-top: 2px; }
+/* "Not yet" floats left as a quiet dismiss; the two run buttons group on the right. */
+.golive-prompt-actions .btn-secondary { margin-right: auto; }
+/* These buttons inherit a min-width from the top bar — clear it so they fit the modal. */
+.golive-prompt-actions .btn-run,
+.golive-prompt-actions .btn-primary { min-width: 0; }
 
 /* ── Wallet cards (Settings) ─────────────────────────────── */
 .wcard-list { display: flex; flex-direction: column; gap: 12px; }
@@ -1779,15 +1840,22 @@ body {
   padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 /* Primary navigation: clean ghost tabs (no box) */
-.rp-tabgroup { display: inline-flex; gap: 2px; min-width: 0; }
+.rp-tabgroup { display: inline-flex; gap: 20px; min-width: 0; }
+/* Underline tabs (same design as the Setup / Activity tabs) with a bright cyan accent. */
 .rp-tab {
+  position: relative;
   display: inline-flex; align-items: center; gap: 7px;
-  background: none; border: none; border-radius: 8px; cursor: pointer;
-  font-size: 13px; font-weight: 500; padding: 6px 11px; color: #94a3b8;
-  transition: background 0.15s, color 0.15s;
+  background: none; border: none; border-radius: 0; cursor: pointer;
+  font-size: 13px; font-weight: 600; padding: 6px 2px 9px; color: #64748b;
+  transition: color 0.12s;
 }
-.rp-tab:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
-.rp-tab.active { background: rgba(167, 139, 250, 0.14); color: #ddd6fe; }
+.rp-tab:hover { color: #cbd5e1; }
+.rp-tab.active { color: #a5f3fc; }
+.rp-tab.active::after {
+  content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
+  background: #22d3ee; border-radius: 2px;
+  box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+}
 /* Contextual actions (Explain / Clear) — small ghost icon buttons, lower weight */
 .rp-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }
 .rp-action {

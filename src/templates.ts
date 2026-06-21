@@ -106,6 +106,50 @@ export function autoFixGeneratedFlow(nodes: Node[], edges: Edge[]): void {
     // Anchor transfers must respect Casper's 2.5 CSPR native-transfer minimum.
     if (Number(data.params.amount) < 2.5) data.params.amount = 2.5
   }
+
+  // 3) Variable normalization. The LLM sometimes invents {{variable}} names the
+  //    app can't resolve (e.g. {{settlement_hash}}), which would render as raw
+  //    braces. Map the common invented names onto the real ones.
+  const VAR_ALIASES: Record<string, string> = {
+    settlement_hash: 'hash', settlementhash: 'hash', tx: 'hash', txhash: 'hash',
+    tx_hash: 'hash', transaction: 'hash', transaction_hash: 'hash', deploy_hash: 'hash',
+    deployhash: 'hash', txid: 'hash', transferhash: 'hash',
+    tx_url: 'txurl', txlink: 'txurl', link: 'txurl', explorer: 'txurl',
+    explorerlink: 'txurl', explorer_url: 'txurl', proof: 'txurl', proof_link: 'txurl', url: 'txurl',
+    cspr_price: 'price', csprprice: 'price', token_price: 'price',
+    wallet_balance: 'balance', walletbalance: 'balance',
+    verdict: 'aidecision', decision: 'aidecision', summary: 'ai', recipient: 'to', sender: 'from',
+  }
+  for (const n of nodes) {
+    const data = n.data as { params?: Params }
+    if (!data.params) continue
+    for (const [k, v] of Object.entries(data.params)) {
+      if (typeof v !== 'string' || !v.includes('{{')) continue
+      data.params[k] = v.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (whole, name) => {
+        const canon = VAR_ALIASES[String(name).toLowerCase()]
+        return canon ? `{{${canon}}}` : whole
+      })
+    }
+  }
+
+  // 4) Snap select params onto a valid option (the LLM may return a near-miss
+  //    like "below" instead of "goes below", or a wrong casing).
+  for (const n of nodes) {
+    const data = n.data as { moduleType?: string; params?: Params }
+    const def = moduleByType(data.moduleType ?? '')
+    if (!def || !data.params) continue
+    for (const p of def.params) {
+      if (p.type !== 'select' || !p.options) continue
+      const cur = data.params[p.key]
+      if (cur == null || cur === '') continue
+      const curS = String(cur).toLowerCase().trim()
+      if (p.options.some((o) => o.toLowerCase() === curS)) continue // already valid
+      const fuzzy = p.options.find(
+        (o) => o.toLowerCase().includes(curS) || curS.includes(o.toLowerCase()),
+      )
+      data.params[p.key] = fuzzy ?? p.default
+    }
+  }
 }
 
 // Build a left-to-right chain (or parallel branches sharing the first trigger).

@@ -4,6 +4,7 @@ import {
   ReactFlowProvider,
   Background,
   MiniMap,
+  SelectionMode,
   addEdge,
   useNodesState,
   useEdgesState,
@@ -34,7 +35,7 @@ import ConsolePanel from './ConsolePanel'
 import HelpHints from './HelpHints'
 import NodeConfig from './NodeConfig'
 import { isWalletInstalled, connectWallet, disconnectWallet, reconnectIfConnected, onWalletEvents } from './wallet'
-import { sendCsprReal, delegateReal, callContractReal, deployTokenReal, deployNftReal, mintNftReal, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
+import { sendCsprReal, delegateReal, callContractReal, deployTokenReal, deployNftReal, mintNftReal, awaitExecution, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
 import { payX402OnChain } from './x402'
 import { swapReal } from './swap'
 import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type WalletProfile } from './wallets'
@@ -1081,7 +1082,13 @@ function Flow() {
             : `${p.key}:${p.type}`,
         )
         .join(', ')
-      return `- ${m.type} (${m.category}): ${m.label}${ps ? ` — params: ${ps}` : ''}`
+      let eg = ''
+      try {
+        eg = m.describe(defaultParams(m))
+      } catch {
+        /* some describes need run context — skip the example */
+      }
+      return `- ${m.type} (${m.category}): ${m.label}${eg ? ` [e.g. "${eg}"]` : ''}${ps ? ` — params: ${ps}` : ''}`
     }).join('\n')
 
   const buildWithAI = async (description: string) => {
@@ -1807,14 +1814,36 @@ function Flow() {
       }
       if (settingsRef.current.liveExecution && signerHex) {
         const net = settingsRef.current.casperNet
-        const report = (label: string, res: { ok: boolean; hash?: string; error?: string }) => {
+        // Poll the node for the real execution result and report Success / Failed —
+        // submission alone doesn't mean the transaction succeeded on-chain.
+        const confirmTx = async (label: string, hash: string): Promise<boolean> => {
+          appendLog(`Confirming ${label} on-chain…`, 'info')
+          const exec = await awaitExecution(net, hash)
+          if (exec.status === 'success') {
+            appendLog(`✓ ${label} CONFIRMED on-chain — Success.`, 'ok')
+            return true
+          }
+          if (exec.status === 'failed') {
+            appendLog(`✗ ${label} FAILED on-chain: ${exec.error || 'execution error'}`, 'warn')
+            bag.lastfailed = label
+            // A confirmed on-chain failure must stop the branch — no downstream
+            // step (e.g. a "deployed!" notification) should run on a failed tx.
+            branchStops = true
+            txFailed = true
+            return false
+          }
+          appendLog(`${label}: still pending after ~40s — check the explorer link above.`, 'info')
+          return false
+        }
+        const report = async (label: string, res: { ok: boolean; hash?: string; error?: string }) => {
           if (res.ok) {
             const url = explorerTxUrl(net, res.hash || '')
-            appendLog(`✓ REAL ${label} submitted — ${res.hash}`, 'ok')
+            appendLog(`REAL ${label} submitted — ${res.hash}`, 'info')
             appendLog(`View: ${url}`, 'info')
             // Expose to downstream steps (e.g. Notification can include {{txurl}}).
             bag.hash = res.hash || ''
             bag.txurl = url
+            if (res.hash) await confirmTx(label, res.hash)
             if (walletKey) refreshWalletBalance(walletKey)
           } else {
             appendLog(`${label} (LIVE) failed: ${res.error}`, 'warn')
@@ -1839,6 +1868,7 @@ function Flow() {
         }
         let handled = true
         let branchStops = false
+        let txFailed = false
         if (data.moduleType === 'transfer') {
           const to = String(params.to).trim().replace(/^account-hash-/i, '')
           const validKey = /^01[0-9a-fA-F]{64}$/.test(to) || /^02[0-9a-fA-F]{66}$/.test(to)
@@ -1860,7 +1890,7 @@ function Flow() {
               net, senderHex: signerHex, recipientHex: to,
               amountCspr: Number(params.amount), transferId: Number(params.transferId) || undefined,
             })
-            report('transfer', txRes)
+            await report('transfer', txRes)
             if (txRes.ok) {
               recordSpend(Number(params.amount))
               addRecentTx(signerHex, {
@@ -1895,7 +1925,7 @@ function Flow() {
               op: (stakeOp as 'Delegate' | 'Undelegate' | 'Redelegate') || 'Delegate',
               newValidatorHex: String(params.newValidator || '').trim() || undefined,
             })
-            report(stakeOp, stRes)
+            await report(stakeOp, stRes)
             if (stRes.ok && stakeSpends) recordSpend(Number(params.amount))
           }
         } else if (data.moduleType === 'callcontract') {
@@ -1906,7 +1936,7 @@ function Flow() {
             await confirmIfNeeded('Call contract', `${params.entrypoint}() · ${contract.slice(0, 8)}…`)
           ) {
             appendLog(`Call ${params.entrypoint}() (LIVE): ${needsApproval ? 'approved — signing…' : signMsg}`, 'info')
-            report('contract call', await callContractReal({
+            await report('contract call', await callContractReal({
               net, senderHex: signerHex, contractHash: contract,
               entrypoint: String(params.entrypoint), argsJson: String(params.args),
               paymentCspr: Number(params.payment) || 2.5,
@@ -1976,6 +2006,7 @@ function Flow() {
               bag.digest = att.digest
               bag.attesturl = url
               bag.txurl = url
+              if (hashes[0]) await confirmTx('Attestation anchor', hashes[0])
               if (walletKey) refreshWalletBalance(walletKey)
             }
           }
@@ -2082,12 +2113,13 @@ function Flow() {
             if (r.ok) {
               if (swapsCspr) recordSpend(Number(params.amount))
               const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`✓ REAL swap submitted — ${r.hash}`, 'ok')
+              appendLog(`REAL swap submitted — ${r.hash}`, 'info')
               if (r.summary) appendLog(r.summary, 'info')
               ;(r.warnings || []).forEach((w) => appendLog(`⚠️ ${w}`, 'warn'))
               appendLog(`View: ${url}`, 'info')
               bag.txurl = url
               bag.hash = r.hash || ''
+              if (r.hash) await confirmTx('Swap', r.hash)
             } else {
               appendLog(`Swap failed: ${r.error}`, 'warn')
             }
@@ -2117,11 +2149,12 @@ function Flow() {
             if (r.ok) {
               recordSpend(deployGas)
               const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`✓ REAL token deploy submitted — ${r.hash}`, 'ok')
+              appendLog(`REAL token deploy submitted — ${r.hash}`, 'info')
               appendLog(`View: ${url}`, 'info')
               bag.txurl = url
               bag.hash = r.hash || ''
               bag.symbol = String(params.symbol)
+              if (r.hash) await confirmTx('Token deploy', r.hash)
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`Token deploy failed: ${r.error}`, 'warn')
@@ -2156,11 +2189,12 @@ function Flow() {
             if (r.ok) {
               recordSpend(nftGas)
               const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`✓ REAL NFT collection deploy submitted — ${r.hash}`, 'ok')
+              appendLog(`REAL NFT collection deploy submitted — ${r.hash}`, 'info')
               appendLog(`View: ${url}`, 'info')
               bag.txurl = url
               bag.hash = r.hash || ''
               bag.symbol = String(params.symbol)
+              if (r.hash) await confirmTx('NFT collection deploy', r.hash)
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`NFT deploy failed: ${r.error}`, 'warn')
@@ -2191,11 +2225,12 @@ function Flow() {
             if (r.ok) {
               recordSpend(mintGas)
               const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`✓ REAL NFT mint submitted — ${r.hash}`, 'ok')
+              appendLog(`REAL NFT mint submitted — ${r.hash}`, 'info')
               appendLog(`View: ${url}`, 'info')
               bag.txurl = url
               bag.hash = r.hash || ''
               bag.nftname = String(params.name)
+              if (r.hash) await confirmTx('NFT mint', r.hash)
               if (walletKey) refreshWalletBalance(walletKey)
             } else {
               appendLog(`NFT mint failed: ${r.error}`, 'warn')
@@ -2205,9 +2240,15 @@ function Flow() {
           handled = false
         }
         if (handled) {
-          setNodeStatus(id, 'done')
-          if (branchStops) appendLog('↳ Branch stops here.', 'warn')
-          else currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
+          setNodeStatus(id, txFailed ? 'error' : 'done')
+          if (branchStops) {
+            appendLog(
+              txFailed ? '↳ Branch stops — the transaction failed on-chain.' : '↳ Branch stops here.',
+              'warn',
+            )
+          } else {
+            currentEdges.filter((e) => e.source === id).forEach((e) => queue.push(e.target))
+          }
           continue
         }
       }
@@ -2743,6 +2784,7 @@ function Flow() {
             nodeDragThreshold={5}
             panOnDrag={interactionMode === 'pan' ? true : [1, 2]}
             selectionOnDrag={interactionMode === 'select'}
+            selectionMode={SelectionMode.Partial}
             onSelectionStart={(e) => {
               const me = e as unknown as MouseEvent
               selStartRef.current = { x: me.clientX, y: me.clientY }
@@ -2889,7 +2931,16 @@ function Flow() {
                 className={`rp-tab${rightTab === 'props' ? ' active' : ''}`}
                 onClick={() => setRightTab('props')}
               >
-                <Icon name="gear" size={14} /> Properties
+                <Icon name="gear" size={14} />{' '}
+                {(() => {
+                  const sn = nodes.find((n) => n.id === selectedNodeId)
+                  const lbl = sn
+                    ? (moduleByType((sn.data as ModuleNodeData).moduleType)?.label || '')
+                        .replace(/\s*\([^)]*\)/g, '')
+                        .trim()
+                    : ''
+                  return lbl ? `${lbl} Properties` : 'Properties'
+                })()}
               </button>
               <button
                 className={`rp-tab${rightTab === 'log' ? ' active' : ''}`}
@@ -2920,7 +2971,7 @@ function Flow() {
                 onClick={() => setShowRightPanel(false)}
                 title="Collapse panel"
               >
-                <Icon name="chevron" size={16} />
+                <Icon name="panel-right" size={16} />
               </button>
             </div>
           </div>

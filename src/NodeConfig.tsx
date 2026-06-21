@@ -5,7 +5,7 @@ import { moduleByType, defaultParams, SIGNABLE, type Params } from './modules'
 import { fetchCsprPrice } from './price'
 import WalletNodeBack from './WalletNodeBack'
 import RecipientField from './RecipientField'
-import AutoTextarea from './AutoTextarea'
+import VariableInput from './VariableInput'
 import Icon from './Icon'
 import type { ModuleNodeData } from './ModuleNode'
 
@@ -54,7 +54,8 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
     .filter((_, i) => i + 1 < myAiRank)
   const insertVars = [
     ...aiVars,
-    'balance', 'sentcount', 'senttotal', 'price', 'amount', 'net', 'time', 'date', 'txurl', 'claimhash',
+    'balance', 'sentcount', 'senttotal', 'price', 'amount', 'net', 'time', 'date',
+    'hash', 'txurl', 'claimhash', 'symbol',
     'x402body', 'x402endpoint', 'x402amount',
   ]
 
@@ -158,8 +159,8 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
           </div>
         ) : /(message|instruction|data|args|prompt|question)/i.test(p.key) ? (
           <>
-            <AutoTextarea
-              className="field-textarea"
+            <VariableInput
+              multiline
               placeholder={
                 /(instruction|prompt|question)/i.test(p.key)
                   ? 'Type your question for the AI — it sees live values, insert them with the chips below.'
@@ -186,12 +187,11 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
           </>
         ) : (
           <>
-            <input
-              type="text"
+            <VariableInput
               value={String(params[p.key])}
-              onChange={(e) => setParam(p.key, e.target.value)}
+              onChange={(v) => setParam(p.key, v)}
             />
-            {/(message|endpoint|url|instruction)/i.test(p.key) && (
+            {/(message|endpoint|url|instruction|title|content)/i.test(p.key) && (
               <div className="field-vars">
                 <span className="field-vars-label">Insert:</span>
                 {insertVars.map((v) => (

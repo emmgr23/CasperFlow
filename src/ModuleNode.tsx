@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow, useNodes, type NodeProps } from '@xyflow/react'
 import { CATEGORY_COLORS, moduleByType, defaultParams, statusOf, type ModuleCategory, type Params } from './modules'
+import { renderChips } from './chips'
 import { aiVarName } from './aiVars'
 import { fetchCsprPrice } from './price'
 import { subscribeRuntime, getLiveSchedule } from './runtime'
@@ -42,7 +43,7 @@ function NodeSparks({ color }: { color: string }) {
 export interface ModuleNodeData {
   moduleType: string
   params?: Params
-  status?: 'idle' | 'running' | 'done' | 'skipped'
+  status?: 'idle' | 'running' | 'done' | 'skipped' | 'error'
   flipped?: boolean
   width?: number
   approval?: 'autonomous' | 'ask'
@@ -144,6 +145,17 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
     >
       {def.category !== 'trigger' && <Handle type="target" position={Position.Left} />}
       {status === 'running' && <NodeSparks color={colors.border} />}
+      {(() => {
+        const st = statusOf(d.moduleType)
+        // Beta / Soon shown as a little sticker stuck on the top-right corner,
+        // poking slightly outside the card. "Live" is the default → no label.
+        if (status === 'running' || status === 'done' || st === 'live') return null
+        return (
+          <span className={`status-sticker status-${st}`}>
+            {st === 'beta' ? 'Beta' : 'Soon'}
+          </span>
+        )
+      })()}
       <div className="node-face node-front" title="Click to edit in the Properties panel">
         <div className="node-title" style={{ color: colors.text }}>
           <Icon name={def.icon} size={17} style={{ color: colors.border, flexShrink: 0 }} />
@@ -155,18 +167,8 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
           )}
           {status === 'running' && <span className="spinner" />}
           {status === 'done' && <Icon name="check" size={15} className="check" />}
+          {status === 'error' && <Icon name="x" size={15} className="xmark" />}
         </div>
-        {(() => {
-          const st = statusOf(d.moduleType)
-          // Only show the pill when it carries information: Beta / Soon.
-          // "Live" is the default, so showing it on every card is just noise.
-          if (status === 'running' || status === 'done' || st === 'live') return null
-          return (
-            <span className={`status-pill status-${st}`}>
-              {st === 'beta' ? 'Beta' : 'Soon'}
-            </span>
-          )
-        })()}
         {isWallet ? (
           <WalletNodeFront id={id} params={params} />
         ) : d.moduleType === 'transfer' ? (
@@ -187,7 +189,7 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
             )
           })()
         ) : (
-          <div className="node-desc">{def.describe(params)}</div>
+          <div className="node-desc">{renderChips(def.describe(params))}</div>
         )}
         {isWallet && String(params.mode) === 'manual' && (
           <div className="approval-chip">
@@ -221,7 +223,11 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
           </div>
         )}
       </div>
-      {def.category !== 'output' && <Handle type="source" position={Position.Right} />}
+      {/* Outputs are terminal — except the receipt, which can chain into a
+          notification (x402 → receipt → notify). */}
+      {(def.category !== 'output' || def.type === 'receipt') && (
+        <Handle type="source" position={Position.Right} />
+      )}
       <div className="node-resize-grip nodrag" onMouseDown={startResize} title="Drag to resize" />
     </div>
   )

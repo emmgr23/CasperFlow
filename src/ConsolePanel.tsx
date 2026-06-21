@@ -51,9 +51,12 @@ export default function ConsolePanel({
 
   const entries = getDebugLog()
 
+  const [copied, setCopied] = useState(false)
   const copyAll = () => {
     const text = entries.map((e) => `[${e.t}] ${e.tag}: ${e.msg}`).join('\n')
     navigator.clipboard?.writeText(text || 'No log entries.')
+    setCopied(true)
+    setTimeout(() => setCopied(false), 1500)
   }
 
   return (
@@ -72,8 +75,8 @@ export default function ConsolePanel({
           <button onClick={() => setPaused((p) => !p)} title="Pause / resume auto-scroll">
             <Icon name={paused ? 'play' : 'pause'} size={12} /> {paused ? 'Resume' : 'Pause'}
           </button>
-          <button onClick={copyAll} title="Copy the full log">
-            <Icon name="file-code" size={12} /> Copy all
+          <button onClick={copyAll} title="Copy the full log" className={copied ? 'copied' : ''}>
+            <Icon name={copied ? 'check' : 'file-code'} size={12} /> {copied ? 'Copied' : 'Copy all'}
           </button>
           <button onClick={() => clearDebugLog()} title="Clear the log">
             Clear

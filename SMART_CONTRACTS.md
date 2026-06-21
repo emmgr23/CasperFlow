@@ -22,7 +22,7 @@ the two standard binaries once:
 | Contract | File to place | Where to get it |
 |---|---|---|
 | CEP-18 fungible token | `public/cep18.wasm` | [`casper-ecosystem/cep18`](https://github.com/casper-ecosystem/cep18) → Releases → `cep18.wasm` (or `cargo odra build` in that repo) |
-| CEP-78 NFT collection | `public/cep78.wasm` | [`casper-nft/cep78`](https://github.com/casper-nft/cep78) → Releases → `contract.wasm` (rename to `cep78.wasm`) |
+| CEP-78 NFT collection | `public/cep78.wasm` | [`casper-ecosystem/cep-78-enhanced-nft`](https://github.com/casper-ecosystem/cep-78-enhanced-nft) → Releases → contract wasm (rename to `cep78.wasm`) |
 
 ```
 CasperFlow/

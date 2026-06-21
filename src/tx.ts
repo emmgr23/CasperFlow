@@ -437,6 +437,35 @@ export async function mintNftReal(opts: {
   }
 }
 
+// After a transaction is submitted, poll the node for its EXECUTION result so we
+// can tell the user whether it actually SUCCEEDED on-chain — not just that it was
+// accepted into the mempool. Returns 'pending' if it hasn't executed in time.
+export async function awaitExecution(
+  net: CasperNet,
+  hash: string,
+  opts?: { tries?: number; delayMs?: number },
+): Promise<{ status: 'success' | 'failed' | 'pending'; error?: string; cost?: number }> {
+  const tries = opts?.tries ?? 12
+  const delayMs = opts?.delayMs ?? 3500
+  const client = rpcOf(net)
+  for (let i = 0; i < tries; i++) {
+    try {
+      const res = (await client.getTransactionByTransactionHash(hash)) as {
+        executionInfo?: { executionResult?: { errorMessage?: string; cost?: number } }
+      }
+      const exec = res?.executionInfo?.executionResult
+      if (exec) {
+        if (exec.errorMessage) return { status: 'failed', error: exec.errorMessage, cost: exec.cost }
+        return { status: 'success', cost: exec.cost }
+      }
+    } catch {
+      // Not indexed yet / transient RPC error — keep polling.
+    }
+    await new Promise((r) => setTimeout(r, delayMs))
+  }
+  return { status: 'pending' }
+}
+
 export const explorerTxUrl = (net: CasperNet, hash: string) =>
   net === 'testnet'
     ? `https://testnet.cspr.live/deploy/${hash}`

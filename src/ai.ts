@@ -72,6 +72,7 @@ export async function askText(cfg: AiConfig, system: string, user: string): Prom
         body: JSON.stringify({
           model: cfg.model,
           max_tokens: 1200,
+          temperature: 0,
           system,
           messages: [{ role: 'user', content: user }],
         }),
@@ -96,6 +97,7 @@ export async function askText(cfg: AiConfig, system: string, user: string): Prom
       headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
       body: JSON.stringify({
         model: cfg.model,
+        temperature: 0,
         messages: [
           { role: 'system', content: system },
           { role: 'user', content: user },
@@ -115,6 +117,33 @@ export interface WorkflowSpec {
   type: string
   params?: Record<string, string | number>
 }
+
+// Shared guidance appended to both the build and edit prompts: maps loose,
+// imperfect phrasing to the right modules + params, and pins the variable names
+// so the model never invents ones the app can't resolve.
+const BUILDER_GUIDE =
+  '\n\nINTENT MAPPING (map loose/everyday wording to the right module):\n' +
+  '- "pay / send / transfer CSPR to someone" → transfer\n' +
+  '- "buy a signal / data / call a paid API / pay per request / x402" → x402\n' +
+  '- "cap / limit spending / max budget / don\'t spend more than" → spendlimit\n' +
+  '- "alert / ping / DM / text / message me / let me know / notify (on Telegram)" → notify\n' +
+  '- "tell the team on Discord" → discord\n' +
+  '- "ask the AI / decide / judge / is it safe" → ai\n' +
+  '- "prove / attest / anchor / record the decision on-chain / tamper-proof" → attest\n' +
+  '- "receipt / proof of payment" → receipt\n' +
+  '- "stake / delegate" → stake; "swap / trade X for Y" → swap; "deploy a token" → deploytoken; "deploy an NFT collection" → deploynft; "mint an NFT" → mintnft\n' +
+  '- "every N minutes/hours" → schedule (Repeat every); "in N seconds/minutes" → schedule (Once after); "when price drops/rises" → price; "when I receive a transfer" → incoming\n\n' +
+  'VARIABLES: results are exposed as {{variables}} you may drop into text params (message, data, title, content). ' +
+  'Use ONLY these exact names — NEVER invent new ones:\n' +
+  '{{hash}} = last transaction / settlement hash · {{txurl}} = explorer link / proof link · {{amount}} = last amount · ' +
+  '{{price}} = live CSPR price · {{balance}} = wallet balance · {{from}} = sender · {{to}} = recipient · ' +
+  '{{symbol}} = token symbol · {{ai}} = the AI decision or summary · {{aidecision}} = YES/NO · {{claimhash}} = attestation hash · ' +
+  '{{time}} · {{date}} · {{x402amount}} · {{x402endpoint}}.\n' +
+  'So "settlement hash" / "transaction hash" / "tx hash" ALL mean {{hash}}; "proof link" / "explorer link" mean {{txurl}}.\n\n' +
+  'EXAMPLES (loose input → correct JSON):\n' +
+  'User: "ping me on telegram when cspr drops under 2 cents" → {"name":"CSPR drop alert","steps":[{"type":"price","params":{"mode":"goes below","threshold":0.02}},{"type":"notify","params":{"message":"CSPR dropped to ${{price}}"}}]}\n' +
+  'User: "with wallet 3, buy a signal from my paid api and text me the proof link" → {"name":"Signal buyer","steps":[{"type":"wallet","params":{"walletName":"wallet 3"}},{"type":"x402","params":{}},{"type":"notify","params":{"message":"Signal bought · proof {{txurl}}"}}]}\n' +
+  'User: "every hour, if the AI says it is safe, send 5 cspr to wallet 2 and anchor the decision on casper" → {"name":"Guarded payout","steps":[{"type":"schedule","params":{"repeat":"Repeat every","interval":1,"unit":"hours"}},{"type":"wallet","params":{"walletName":"wallet 2"}},{"type":"ai","params":{"instruction":"Is it safe to send the payout now?"}},{"type":"transfer","params":{"amount":5}},{"type":"attest","params":{"topic":"payout-decision","data":"AI verdict {{aidecision}}: {{ai}}"}}]}\n'
 
 // Edit an existing workflow from a natural-language instruction (iOS-26 style refine).
 // Receives the current flow as a compact description; returns the full updated steps.
@@ -136,7 +165,8 @@ export async function editWorkflow(
     '\n\nTIMING: for a one-time action after a delay (e.g. "in 1 min 23 sec") use a single `schedule` with repeat="Once after" and interval+unit (83, seconds) — do NOT add a `delay` step. For recurring ("every 5 min") use repeat="Repeat every". Convert durations into interval+unit; never default to 5 minutes.\n' +
     'WALLET: if the workflow signs a transaction (send, stake, attest, swap, x402, etc.) include exactly ONE `wallet` step before those actions. If the user names a wallet (e.g. "use wallet 3"), set its params to {"walletName":"<the exact name they said>"}; the app binds the real saved wallet automatically — never invent keys, secrets or public addresses.\n' +
     'Only make the change the user asked for — do not add extra steps (notifications, delays, conditions) unless requested.\n' +
-    'Output JSON only, no prose.'
+    BUILDER_GUIDE +
+    '\nOutput JSON only, no prose.'
   const user = `CURRENT WORKFLOW:\n${currentFlow}\n\nINSTRUCTION:\n${instruction}`
   const text = await askText(cfg, system, user)
   if (!text) return null
@@ -171,7 +201,9 @@ export async function generateWorkflow(
     '- Convert all durations into the correct interval+unit; never silently default to 5 minutes.\n\n' +
     'WALLET RULE: if the agent signs a transaction (send, stake, attest, swap, x402, etc.) include exactly ONE `wallet` step before those actions. If the user names a wallet (e.g. "use wallet 3"), set its params to {"walletName":"<the exact name they said>"}; the app binds the real saved wallet automatically — never invent keys, secrets or addresses.\n' +
     'STEP RULES: Add ONLY the steps the user actually asked for. Do not add notifications, delays, conditions or extra actions unless requested. ' +
-    'Keep it minimal (often just trigger + one action). Only include params you are confident about; defaults are fine otherwise. Output JSON only, no prose.'
+    'Keep it minimal (often just trigger + one action). Only include params you are confident about; defaults are fine otherwise.' +
+    BUILDER_GUIDE +
+    '\nOutput JSON only, no prose.'
   const text = await askText(cfg, system, description)
   if (!text) return null
   try {

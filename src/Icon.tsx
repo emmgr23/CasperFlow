@@ -416,6 +416,14 @@ const PATHS: Record<string, React.ReactNode> = {
   ),
   check: <polyline points="20 6 9 17 4 12" />,
   chevron: <polyline points="9 6 15 12 9 18" />,
+  // Right-sidebar toggle (Xcode / VSCode style): rounded panel with its right column filled.
+  'panel-right': (
+    <>
+      <rect x="14" y="4.8" width="6.7" height="14.4" fill="currentColor" stroke="none" />
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <line x1="14" y1="4" x2="14" y2="20" />
+    </>
+  ),
   hexagon: <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z" />,
   'zoom-in': (
     <>
