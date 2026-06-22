@@ -129,6 +129,41 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 
 export const agentToolById = (id: string) => AGENT_TOOLS.find((t) => t.id === id)
 
+// "Auto" mode: pick the tools an agent needs straight from its goal text, so a
+// non-technical user doesn't have to choose them. Read-only tools (balance,
+// price) are always on; signing tools are added only when the goal asks for the
+// matching action. Generous selection is safe: unused tools are simply never
+// called, and money-moving tools stay gated by the spend limit + approval.
+export function inferToolsFromGoal(goal: string): string[] {
+  const g = (goal || '').toLowerCase()
+  const picked = new Set<string>(['read_balance', 'get_price'])
+  if (/\b(send|sends|sending|sent|transfer|transfers|pay|pays|paying|payment|payroll|distribute|airdrop)\b/.test(g))
+    picked.add('send_cspr')
+  if (/\b(stake|stakes|staking|delegate|delegates|delegation|restake|validator)\b/.test(g))
+    picked.add('delegate')
+  if (/\b(attest|anchor|anchors|proof|prove|record|records|notari|certify|stamp|note|log\s+on)\b/.test(g))
+    picked.add('attest')
+  if (/(\.cspr|cspr\.name|resolve)\b/.test(g)) picked.add('resolve_name')
+  if (/\b(history|recent|past|previous|last\s+\d+|activity)\b/.test(g)) picked.add('recent_transfers')
+  // Keep the canonical order from AGENT_TOOLS.
+  return AGENT_TOOLS.filter((t) => picked.has(t.id)).map((t) => t.id)
+}
+
+// Resolve a node's effective tools: inferred from the goal in 'auto' mode,
+// otherwise the explicitly-picked list.
+export function effectiveTools(
+  mode: string | number | undefined,
+  toolsParam: string | number | undefined,
+  goal: string,
+): AgentToolDef[] {
+  if (String(mode ?? 'auto') === 'auto') {
+    return inferToolsFromGoal(goal)
+      .map(agentToolById)
+      .filter((t): t is AgentToolDef => !!t)
+  }
+  return toolsFromParam(toolsParam)
+}
+
 // Suggested roles for the Autonomous Agent. Shown as a dropdown, but the field
 // stays free-text so anyone can describe a custom role.
 export const AGENT_ROLES = [

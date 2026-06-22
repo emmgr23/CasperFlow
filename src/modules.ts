@@ -659,6 +659,9 @@ export const MODULES: ModuleDef[] = [
     params: [
       { key: 'role', label: 'Role', type: 'text', default: 'Autonomous treasury operator' },
       { key: 'goal', label: 'Goal (plain English)', type: 'text', default: '' },
+      // 'auto' = tools inferred from the goal (default, simplest for newcomers).
+      // 'manual' = the explicit list in `tools`.
+      { key: 'toolsMode', label: 'Tool selection', type: 'text', default: 'auto' },
       {
         key: 'tools',
         label: 'Tools (comma-separated)',

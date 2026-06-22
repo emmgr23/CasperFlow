@@ -6,7 +6,7 @@ import { fetchCsprPrice } from './price'
 import WalletNodeBack from './WalletNodeBack'
 import RecipientField from './RecipientField'
 import VariableInput from './VariableInput'
-import { AGENT_TOOLS, AGENT_ROLES } from './agentTools'
+import { AGENT_TOOLS, AGENT_ROLES, inferToolsFromGoal } from './agentTools'
 import Icon from './Icon'
 import type { ModuleNodeData } from './ModuleNode'
 
@@ -74,6 +74,21 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
   const isSelfTransfer =
     !!upstreamWallet?.pub && !!recipientTo && recipientTo === upstreamWallet.pub.toLowerCase()
 
+  // Pre-run safety for an Autonomous Agent goal: if the user typed an amount
+  // below Casper's 2.5 CSPR native-transfer minimum (e.g. "2 CSPR", "2.4 CSPR"),
+  // warn right under the field, before any run.
+  const belowMinAmount = (() => {
+    if (data.moduleType !== 'agent') return null
+    const g = String(params.goal ?? '')
+    const re = /(\d+(?:[.,]\d+)?)\s*cspr\b/gi
+    let m: RegExpExecArray | null
+    while ((m = re.exec(g))) {
+      const v = parseFloat(m[1].replace(',', '.'))
+      if (v > 0 && v < 2.5) return v
+    }
+    return null
+  })()
+
   // Variables offered as one-click "Insert" chips. AI outputs (ai, ai2, …) are
   // added dynamically. An AI node only sees the AIs BEFORE it (so they can feed
   // each other in the right order); other actions see them all.
@@ -91,6 +106,8 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
   ]
 
   const renderField = (p: (typeof def.params)[number]) => {
+    // Internal control rendered inside the tools picker, not as its own field.
+    if (p.key === 'toolsMode') return null
     // Send CSPR recipient: paste a key, pick a saved wallet, or resolve a CSPR.name.
     if (data.moduleType === 'transfer' && p.key === 'to') {
       return (
@@ -131,30 +148,76 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
         </div>
       )
     }
-    // Autonomous Agent toolbox: pick the tools from clickable tags instead of a
-    // comma-separated text field. A ⚡ marks tools that sign a transaction.
-    if (data.moduleType === 'agent' && p.key === 'tools') {
-      const selected = new Set(
-        String(params.tools ?? '')
-          .split(',')
-          .map((s) => s.trim())
-          .filter(Boolean),
+    // Autonomous Agent goal: free English, plus a live warning if the user names
+    // an amount below Casper's 2.5 CSPR minimum (caught before any run).
+    if (data.moduleType === 'agent' && p.key === 'goal') {
+      return (
+        <div key={p.key} className="node-field">
+          <label>{p.label}</label>
+          <VariableInput
+            multiline
+            placeholder="Describe the goal in plain English…"
+            value={String(params.goal ?? '')}
+            onChange={(v) => setParam('goal', v)}
+          />
+          {belowMinAmount != null && (
+            <div className="field-warn">
+              <Icon name="shield" size={13} />
+              <span>
+                You wrote {belowMinAmount} CSPR. Casper&apos;s minimum native transfer is 2.5 CSPR, so a
+                send below that will be blocked. Use 2.5 CSPR or more.
+              </span>
+            </div>
+          )}
+        </div>
       )
+    }
+    // Autonomous Agent toolbox: in "Auto", the tools are inferred from the goal
+    // (nothing to pick). In "Manual", pick them from clickable tags. ⚡ = signs.
+    if (data.moduleType === 'agent' && p.key === 'tools') {
+      const isAuto = String(params.toolsMode ?? 'auto') === 'auto'
+      const inferred = inferToolsFromGoal(String(params.goal ?? ''))
+      const manualSel = String(params.tools ?? '')
+        .split(',')
+        .map((s) => s.trim())
+        .filter(Boolean)
+      const activeSet = new Set(isAuto ? inferred : manualSel)
+      const idsToCsv = (ids: Set<string>) =>
+        AGENT_TOOLS.filter((t) => ids.has(t.id)).map((t) => t.id).join(',')
       const toggle = (toolId: string) => {
-        const next = new Set(selected)
+        const next = new Set(activeSet)
         if (next.has(toolId)) next.delete(toolId)
         else next.add(toolId)
-        setParam('tools', AGENT_TOOLS.filter((t) => next.has(t.id)).map((t) => t.id).join(','))
+        // Editing a chip implies manual control, so switch out of Auto.
+        setParams({ toolsMode: 'manual', tools: idsToCsv(next) })
       }
       return (
         <div key={p.key} className="node-field">
-          <label>Tools the agent can use</label>
+          <label>
+            Tools the agent can use
+            <span className="tool-mode">
+              <button
+                type="button"
+                className={`tool-mode-btn${isAuto ? ' on' : ''}`}
+                onClick={() => setParam('toolsMode', 'auto')}
+              >
+                Auto
+              </button>
+              <button
+                type="button"
+                className={`tool-mode-btn${!isAuto ? ' on' : ''}`}
+                onClick={() => setParams({ toolsMode: 'manual', tools: idsToCsv(activeSet) })}
+              >
+                Manual
+              </button>
+            </span>
+          </label>
           <div className="tool-tags">
             {AGENT_TOOLS.map((t) => (
               <button
                 type="button"
                 key={t.id}
-                className={`tool-tag${selected.has(t.id) ? ' on' : ''}`}
+                className={`tool-tag${activeSet.has(t.id) ? ' on' : ''}${isAuto ? ' auto' : ''}`}
                 onClick={() => toggle(t.id)}
                 title={t.spec.description}
               >
@@ -163,6 +226,12 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
               </button>
             ))}
           </div>
+          {isAuto && (
+            <div className="tool-auto-hint">
+              Chosen automatically from your goal. Edit your goal to change them, or click a tool to
+              switch to Manual.
+            </div>
+          )}
         </div>
       )
     }

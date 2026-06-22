@@ -132,8 +132,9 @@ async function signSubmit(
   label: string,
 ): Promise<TxResult> {
   if (agentSigner) {
-    // Autonomous: sign locally, no popup. The SDK hashes + attaches the approval.
-    debugLog('tx', `Signing locally with agent key (autonomous, no popup): ${label}`)
+    // Sign locally with the connected wallet key (no browser-extension popup).
+    // Any in-app approval, in Manual mode, already happened before this point.
+    debugLog('tx', `Signing locally with the connected wallet key: ${label}`)
     transaction.sign(agentSigner.key)
   } else {
     const sender = PublicKey.fromHex(senderHex)

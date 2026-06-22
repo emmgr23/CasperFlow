@@ -26,7 +26,7 @@ import WorkspaceBar from './WorkspaceBar'
 import TemplateGallery from './TemplateGallery'
 import { type AgentTemplate, buildFromSpecs, AGENT_TEMPLATES } from './templates'
 import { generateWorkflow, editWorkflow, askText, runAgent } from './ai'
-import { toolsFromParam } from './agentTools'
+import { effectiveTools } from './agentTools'
 import {
   loadStore, saveStore, newId, exportWorkspace, downloadJson, parseImport,
   type Workspace, type WorkspaceStore,
@@ -2464,9 +2464,6 @@ function Flow() {
             const isKey = (s: string) => /^01[0-9a-fA-F]{64}$/.test(s) || /^02[0-9a-fA-F]{66}$/.test(s)
             const isHash = (s: string) => /^[0-9a-fA-F]{64}$/.test(s)
             const cloud = settingsRef.current.csprCloudKey || ''
-            const enabledTools = toolsFromParam(params.tools)
-            const toolSpecs = enabledTools.map((t) => t.spec)
-            const hasSigningTool = enabledTools.some((t) => t.signs)
             const role = String(params.role || 'Autonomous on-chain agent')
             // Tie each journal line to the agent badge on the canvas (Agent 1 / Agent 2)
             // so a multi-agent run reads as "who did what".
@@ -2478,6 +2475,10 @@ function Flow() {
             const goal =
               substituteVars(String(params.goal || '').trim(), bag) ||
               'Use your tools to inspect the wallet and report its status.'
+            // 'auto' mode infers the toolbox from the goal; 'manual' uses the picked list.
+            const enabledTools = effectiveTools(params.toolsMode, params.tools, goal)
+            const toolSpecs = enabledTools.map((t) => t.spec)
+            const hasSigningTool = enabledTools.some((t) => t.signs)
             const system =
               `You are "${role}", an autonomous agent operating on the Casper ${net} network. ` +
               'Pursue the goal by calling the available tools: think, call one or more tools, read the ' +
@@ -2544,6 +2545,24 @@ function Flow() {
                   const amt = Number(args.amount)
                   if (!(amt > 0)) return 'Refused: amount must be a positive number of CSPR.'
                   if (!isKey(to) && !isHash(to)) return `Refused: "${String(args.to)}" is not a valid recipient.`
+                  // Casper rejects native transfers below 2.5 CSPR. Catch it here,
+                  // before signing, with a clean message (no raw RPC error) and lock
+                  // signing so the agent can't bump the amount to work around it.
+                  if (amt < 2.5) {
+                    signingLocked = true
+                    recordJournal({
+                      actor: agentActor,
+                      kind: 'transfer',
+                      title: `Blocked: ${amt} CSPR is below the 2.5 CSPR minimum (to ${String(args.to)})`,
+                      amount: amt,
+                      usd: getCsprPrice() ?? undefined,
+                      from: walletNameForAction || undefined,
+                      to: String(args.to),
+                      status: 'blocked',
+                      net,
+                    })
+                    return 'Refused: Casper requires a minimum native transfer of 2.5 CSPR. Signing is now locked for this run; do not change the amount. Stop.'
+                  }
                   if (signerHex && to.toLowerCase() === signerHex.toLowerCase()) {
                     signingLocked = true
                     recordJournal({
@@ -2589,8 +2608,12 @@ function Flow() {
                       status: 'failed',
                       net,
                     })
+                    // A failed signing attempt also locks signing, so the agent
+                    // cannot retry the same transfer with a tweaked argument.
+                    signingLocked = true
                     branchStops = true
-                    return `Transfer failed: ${r.error}`
+                    const short = String(r.error || 'unknown error').replace(/\s+/g, ' ').slice(0, 140)
+                    return `Transfer failed (${short}). Signing is now locked for this run; do not retry. Stop.`
                   }
                   recordSpend(amt)
                   didAct = true
