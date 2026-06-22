@@ -6,6 +6,7 @@ import { fetchCsprPrice } from './price'
 import WalletNodeBack from './WalletNodeBack'
 import RecipientField from './RecipientField'
 import VariableInput from './VariableInput'
+import { AGENT_TOOLS } from './agentTools'
 import Icon from './Icon'
 import type { ModuleNodeData } from './ModuleNode'
 
@@ -66,6 +67,41 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
         <div key={p.key} className="node-field">
           <label>Recipient</label>
           <RecipientField params={params} setParams={setParams} />
+        </div>
+      )
+    }
+    // Autonomous Agent toolbox: pick the tools from clickable tags instead of a
+    // comma-separated text field. A ⚡ marks tools that sign a transaction.
+    if (data.moduleType === 'agent' && p.key === 'tools') {
+      const selected = new Set(
+        String(params.tools ?? '')
+          .split(',')
+          .map((s) => s.trim())
+          .filter(Boolean),
+      )
+      const toggle = (toolId: string) => {
+        const next = new Set(selected)
+        if (next.has(toolId)) next.delete(toolId)
+        else next.add(toolId)
+        setParam('tools', AGENT_TOOLS.filter((t) => next.has(t.id)).map((t) => t.id).join(','))
+      }
+      return (
+        <div key={p.key} className="node-field">
+          <label>Tools the agent can use</label>
+          <div className="tool-tags">
+            {AGENT_TOOLS.map((t) => (
+              <button
+                type="button"
+                key={t.id}
+                className={`tool-tag${selected.has(t.id) ? ' on' : ''}`}
+                onClick={() => toggle(t.id)}
+                title={t.spec.description}
+              >
+                {t.label}
+                {t.signs && <span className="tool-tag-sign" title="Signs a transaction">⚡</span>}
+              </button>
+            ))}
+          </div>
         </div>
       )
     }

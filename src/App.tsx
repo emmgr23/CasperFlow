@@ -2550,6 +2550,7 @@ function Flow() {
             }
 
             appendLog(`Autonomous Agent "${role}" starting…`, 'info')
+            let toolCallCount = 0
             const result = await runAgent(aiCfg, {
               system,
               goal,
@@ -2558,7 +2559,10 @@ function Flow() {
               maxSteps: Math.max(2, Math.min(12, Number(params.maxSteps) || 6)),
               onEvent: (ev) => {
                 if (ev.kind === 'thinking' && ev.text) appendLog(`🧠 ${ev.text}`, 'step')
-                else if (ev.kind === 'tool_call') appendLog(`→ ${ev.tool}(${JSON.stringify(ev.args ?? {})})`, 'info')
+                else if (ev.kind === 'tool_call') {
+                  toolCallCount++
+                  appendLog(`→ ${ev.tool}(${JSON.stringify(ev.args ?? {})})`, 'info')
+                }
                 else if (ev.kind === 'tool_result' && ev.result) appendLog(`← ${ev.tool}: ${ev.result}`, 'info')
                 else if (ev.kind === 'final') appendLog(`✓ Agent: ${ev.text || '(no answer returned)'}`, 'ok')
                 else if (ev.kind === 'error' && ev.text) appendLog(`Agent error: ${ev.text}`, 'warn')
@@ -2571,6 +2575,22 @@ function Flow() {
               .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
             const aidx = agentNodes.findIndex((n) => n.id === id)
             bag[aidx <= 0 ? 'agent' : `agent${aidx + 1}`] = result.finalText || '(no output)'
+            // An agent that errored (e.g. provider without tool calling) must show
+            // red + stop the branch, not a green "done".
+            if (result.stopped === 'error') {
+              txFailed = true
+              branchStops = true
+            } else if (toolCallCount === 0) {
+              // The model answered but never actually called a tool (it only said
+              // it would). Almost always the provider didn't pass the tool
+              // definitions through (e.g. an OpenAI-compatible proxy that drops them).
+              appendLog(
+                '⚠️ The agent answered without calling any tool — it did not actually read or do anything. Your AI provider is likely not passing tool definitions. Use a tool-capable provider (Groq is free, or Claude / OpenAI direct).',
+                'warn',
+              )
+              txFailed = true
+              branchStops = true
+            }
           }
         } else {
           handled = false
@@ -3316,8 +3336,20 @@ function Flow() {
                   </button>
                   <button
                     className="rp-action"
-                    onClick={() => setLog([])}
-                    title="Clear the log"
+                    onClick={() => {
+                      setLog([])
+                      // Also reset every node back to its idle state (clears the
+                      // green "done" / red "error" rings + the check / cross icons).
+                      setNodes((nds) =>
+                        nds.map((n) =>
+                          (n.data as ModuleNodeData)?.status &&
+                          (n.data as ModuleNodeData).status !== 'idle'
+                            ? { ...n, data: { ...n.data, status: 'idle' } }
+                            : n,
+                        ),
+                      )
+                    }}
+                    title="Clear the log and reset node states"
                     disabled={log.length === 0}
                   >
                     <Icon name="trash" size={15} />

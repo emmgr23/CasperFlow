@@ -3,13 +3,14 @@
 // Note: Claude (Anthropic) supports direct browser calls. OpenAI / Gemini / Grok
 // typically require a backend proxy due to CORS — handled gracefully.
 
-export type AiProvider = 'claude' | 'openai' | 'gemini' | 'grok' | 'custom'
+export type AiProvider = 'claude' | 'openai' | 'gemini' | 'grok' | 'groq' | 'custom'
 
 export const AI_MODELS: Record<AiProvider, string[]> = {
   claude: ['claude-haiku-4-5-20251001', 'claude-sonnet-4-6'],
   openai: ['gpt-4o-mini', 'gpt-4o'],
   gemini: ['gemini-2.0-flash', 'gemini-2.0-pro'],
   grok: ['grok-3-mini', 'grok-3'],
+  groq: ['llama-3.3-70b-versatile', 'llama-3.1-8b-instant'],
   custom: [],
 }
 
@@ -18,8 +19,13 @@ export const PROVIDER_LABELS: Record<AiProvider, string> = {
   openai: 'ChatGPT (OpenAI)',
   gemini: 'Gemini (Google)',
   grok: 'Grok (xAI)',
+  groq: 'Groq (Llama, free, supports tools)',
   custom: 'Custom (OpenAI-compatible)',
 }
+
+// Groq is OpenAI-compatible and free; its endpoint passes tool definitions through,
+// so the Autonomous Agent works on it (unlike some proxies).
+const GROQ_BASE = 'https://api.groq.com/openai/v1'
 
 export interface AiConfig {
   provider: AiProvider
@@ -35,6 +41,20 @@ export interface AiVerdict {
 }
 
 import { debugLog } from './runtime'
+import { recordUsage } from './aiUsage'
+
+// Count one API call + its token usage against the active config's daily counter.
+function trackUsage(cfg: AiConfig, j: unknown) {
+  const o = (j ?? {}) as {
+    usage?: { total_tokens?: number; input_tokens?: number; output_tokens?: number }
+    usageMetadata?: { totalTokenCount?: number }
+  }
+  let tokens = 0
+  if (o.usage?.total_tokens != null) tokens = o.usage.total_tokens
+  else if (o.usage) tokens = (o.usage.input_tokens ?? 0) + (o.usage.output_tokens ?? 0)
+  else if (o.usageMetadata?.totalTokenCount != null) tokens = o.usageMetadata.totalTokenCount
+  recordUsage({ provider: cfg.provider, model: cfg.model, apiKey: cfg.apiKey }, tokens)
+}
 
 const SYSTEM =
   'You are the decision gate of an autonomous on-chain agent. ' +
@@ -87,6 +107,7 @@ export async function askText(cfg: AiConfig, system: string, user: string): Prom
         return null
       }
       const j = await r.json()
+      trackUsage(cfg, j)
       return j?.content?.[0]?.text ?? null
     }
     // OpenAI-compatible (openai, grok, custom, gemini-as-openai not covered)
@@ -95,7 +116,9 @@ export async function askText(cfg: AiConfig, system: string, user: string): Prom
         ? 'https://api.openai.com/v1'
         : cfg.provider === 'grok'
           ? 'https://api.x.ai/v1'
-          : (cfg.baseUrl || '').replace(/\/+$/, '')
+          : cfg.provider === 'groq'
+            ? GROQ_BASE
+            : (cfg.baseUrl || '').replace(/\/+$/, '')
     if (!base) return null
     const r = await fetch(`${base}/chat/completions`, {
       method: 'POST',
@@ -111,6 +134,7 @@ export async function askText(cfg: AiConfig, system: string, user: string): Prom
     })
     if (!r.ok) return null
     const j = await r.json()
+    trackUsage(cfg, j)
     return j?.choices?.[0]?.message?.content ?? null
   } catch (e) {
     debugLog('ai', `Text call error: ${e instanceof Error ? e.message : 'network/CORS'}`)
@@ -291,6 +315,7 @@ export async function askAi(
         return null
       }
       const j = await r.json()
+      trackUsage(cfg, j)
       const text = j?.content?.[0]?.text ?? ''
       return parseVerdict(text)
     }
@@ -309,6 +334,7 @@ export async function askAi(
       })
       if (!r.ok) return null
       const j = await r.json()
+      trackUsage(cfg, j)
       return parseVerdict(j?.choices?.[0]?.message?.content ?? '')
     }
 
@@ -325,15 +351,18 @@ export async function askAi(
       )
       if (!r.ok) return null
       const j = await r.json()
+      trackUsage(cfg, j)
       return parseVerdict(j?.candidates?.[0]?.content?.parts?.[0]?.text ?? '')
     }
 
-    // OpenAI-compatible providers: Grok (xAI) and any Custom endpoint (AlterHQ, etc.)
-    if (cfg.provider === 'grok' || cfg.provider === 'custom') {
+    // OpenAI-compatible providers: Grok (xAI), Groq, any Custom endpoint (AlterHQ…).
+    if (cfg.provider === 'grok' || cfg.provider === 'groq' || cfg.provider === 'custom') {
       const base =
         cfg.provider === 'grok'
           ? 'https://api.x.ai/v1'
-          : (cfg.baseUrl || '').replace(/\/+$/, '')
+          : cfg.provider === 'groq'
+            ? GROQ_BASE
+            : (cfg.baseUrl || '').replace(/\/+$/, '')
       if (!base) return null
       const url = /\/(chat\/)?completions$/.test(base) ? base : `${base}/chat/completions`
       const r = await fetch(url, {
@@ -349,6 +378,7 @@ export async function askAi(
       })
       if (!r.ok) return null
       const j = await r.json()
+      trackUsage(cfg, j)
       return parseVerdict(j?.choices?.[0]?.message?.content ?? '')
     }
   } catch (e) {
@@ -397,11 +427,13 @@ export interface AgentResult {
   stopped: 'done' | 'maxsteps' | 'error'
 }
 
-const isOpenAiCompatible = (p: AiProvider) => p === 'openai' || p === 'grok' || p === 'custom'
+const isOpenAiCompatible = (p: AiProvider) =>
+  p === 'openai' || p === 'grok' || p === 'groq' || p === 'custom'
 
 function openAiBase(cfg: AiConfig): string {
   if (cfg.provider === 'openai') return 'https://api.openai.com/v1'
   if (cfg.provider === 'grok') return 'https://api.x.ai/v1'
+  if (cfg.provider === 'groq') return GROQ_BASE
   return (cfg.baseUrl || '').replace(/\/+$/, '')
 }
 
@@ -423,6 +455,61 @@ export async function runAgent(cfg: AiConfig, opts: AgentRunOptions): Promise<Ag
   } catch (e) {
     emit({ kind: 'error', text: e instanceof Error ? e.message : 'agent loop error (network/CORS)' })
     return { finalText: '', steps: 0, stopped: 'error' }
+  }
+}
+
+// Capability probe: does the configured provider actually support tool calling?
+// We send one trivial tool and check whether the model calls it. Used by
+// Settings → Test AI to warn up-front (the Autonomous Agent needs tool calling).
+export async function probeToolSupport(cfg: AiConfig): Promise<'yes' | 'no' | 'unknown'> {
+  if (!cfg.apiKey) return 'unknown'
+  const name = 'cf_ping'
+  try {
+    if (cfg.provider === 'claude') {
+      const r = await fetch('https://api.anthropic.com/v1/messages', {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          'x-api-key': cfg.apiKey,
+          'anthropic-version': '2023-06-01',
+          'anthropic-dangerous-direct-browser-access': 'true',
+        },
+        body: JSON.stringify({
+          model: cfg.model,
+          max_tokens: 80,
+          tools: [{ name, description: 'A health-check tool. Call it.', input_schema: { type: 'object', properties: {} } }],
+          tool_choice: { type: 'tool', name },
+          messages: [{ role: 'user', content: 'Call the cf_ping tool.' }],
+        }),
+      })
+      if (!r.ok) return 'unknown'
+      const j = await r.json()
+      const blocks: { type?: string }[] = Array.isArray(j?.content) ? j.content : []
+      return blocks.some((b) => b.type === 'tool_use') ? 'yes' : 'no'
+    }
+    if (isOpenAiCompatible(cfg.provider)) {
+      const base = openAiBase(cfg)
+      if (!base) return 'unknown'
+      const url = /\/(chat\/)?completions$/.test(base) ? base : `${base}/chat/completions`
+      const r = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+        body: JSON.stringify({
+          model: cfg.model,
+          max_tokens: 80,
+          messages: [{ role: 'user', content: 'You must call the cf_ping tool now.' }],
+          tools: [{ type: 'function', function: { name, description: 'A health-check tool. Call it.', parameters: { type: 'object', properties: {} } } }],
+          tool_choice: 'auto',
+        }),
+      })
+      if (!r.ok) return 'unknown'
+      const j = await r.json()
+      const tc = j?.choices?.[0]?.message?.tool_calls
+      return Array.isArray(tc) && tc.length > 0 ? 'yes' : 'no'
+    }
+    return 'unknown'
+  } catch {
+    return 'unknown'
   }
 }
 
@@ -467,6 +554,7 @@ async function runAgentClaude(
       return { finalText: '', steps, stopped: 'error' }
     }
     const j = await r.json()
+    trackUsage(cfg, j)
     const content: Block[] = Array.isArray(j?.content) ? j.content : []
     const textOut = content
       .filter((b) => b.type === 'text')
@@ -476,12 +564,14 @@ async function runAgentClaude(
     if (textOut) emit({ kind: 'thinking', text: textOut })
     const toolUses = content.filter((b) => b.type === 'tool_use')
     if (toolUses.length === 0) {
-      if (!textOut)
+      if (!textOut) {
         emit({
           kind: 'error',
           text: `Claude returned no text and no tool call (stop_reason: ${j?.stop_reason ?? 'unknown'}).`,
         })
-      else emit({ kind: 'final', text: textOut })
+        return { finalText: '', steps, stopped: 'error' }
+      }
+      emit({ kind: 'final', text: textOut })
       return { finalText: textOut, steps, stopped: 'done' }
     }
     messages.push({ role: 'assistant', content })
@@ -535,6 +625,7 @@ async function runAgentOpenAi(
       return { finalText: '', steps, stopped: 'error' }
     }
     const j = await r.json()
+    trackUsage(cfg, j)
     const choice = j?.choices?.[0]
     const msg = choice?.message
     if (!msg) {
@@ -549,14 +640,16 @@ async function runAgentOpenAi(
     if (msg.content) emit({ kind: 'thinking', text: String(msg.content) })
     if (toolCalls.length === 0) {
       const finalText = String(msg.content ?? '')
-      if (!finalText)
+      if (!finalText) {
         emit({
           kind: 'error',
           text: `The model returned no text and called no tool (finish_reason: ${
             choice?.finish_reason ?? 'unknown'
           }). This provider/model likely does not support tool calling, which the agent needs. Try Claude or OpenAI gpt-4o.`,
         })
-      else emit({ kind: 'final', text: finalText })
+        return { finalText: '', steps, stopped: 'error' }
+      }
+      emit({ kind: 'final', text: finalText })
       return { finalText, steps, stopped: 'done' }
     }
     messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls })

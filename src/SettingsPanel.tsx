@@ -13,7 +13,8 @@ import {
   type WalletProfile,
   type WalletFormat,
 } from './wallets'
-import { askAi, fetchModels, AI_MODELS, PROVIDER_LABELS, type AiProvider } from './ai'
+import { askAi, fetchModels, probeToolSupport, AI_MODELS, PROVIDER_LABELS, type AiProvider } from './ai'
+import { getUsage, subscribeUsage } from './aiUsage'
 import Icon from './Icon'
 
 export interface AiProfile {
@@ -187,6 +188,10 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
 
   // Keep the wallet list in sync with changes made on the canvas.
   useEffect(() => subscribeWallets(() => setWallets(loadWalletProfiles())), [])
+
+  // Re-render the AI profile cards live as their daily usage ticks up.
+  const [, bumpUsage] = useState(0)
+  useEffect(() => subscribeUsage(() => bumpUsage((n) => n + 1)), [])
 
   const resetWalletForm = () => {
     setWEditId('')
@@ -449,11 +454,26 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
       'This is a CasperFlow connection test.',
     )
     const ok = !!v
-    setAiStatus(
-      ok
-        ? `Connected — model replied: "${(v!.reason || v!.raw || 'ok').slice(0, 80)}"`
-        : 'No reply — key may be invalid, or this provider needs the backend (coming). Claude works in-browser.',
-    )
+    let note = ok
+      ? `Connected, model replied: "${(v!.reason || v!.raw || 'ok').slice(0, 80)}"`
+      : 'No reply, key may be invalid, or this provider needs the backend (coming). Claude works in-browser.'
+    setAiStatus(ok ? `${note}  ·  checking tool calling…` : note)
+    if (ok) {
+      // The Autonomous Agent needs tool calling. Warn here if the provider lacks it.
+      const cap = await probeToolSupport({
+        provider: settings.aiProvider,
+        apiKey: settings.aiKey,
+        model: settings.aiModel,
+        baseUrl: settings.aiBaseUrl,
+      })
+      note +=
+        cap === 'yes'
+          ? '  ·  ✓ supports tool calling (Autonomous Agent will work)'
+          : cap === 'no'
+            ? '  ·  ⚠️ this provider does NOT support tool calling, so the Autonomous Agent will not work with it. Use Groq (free), Claude, or OpenAI.'
+            : '  ·  (could not verify tool calling)'
+      setAiStatus(note)
+    }
     if (settings.activeProfileId) {
       set({
         aiProfiles: settings.aiProfiles.map((p) =>
@@ -567,7 +587,7 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                       <span className="conn-sub">{r.sub}</span>
                     </span>
                     <span className={`conn-status ${r.on ? 'on' : 'off'}`}>
-                      <span className="conn-dot" /> {r.on ? 'Connected' : 'Not set'}
+                      <span className="conn-dot" /> {r.on ? 'Linked' : 'Not set'}
                     </span>
                     <Icon name="chevron" size={13} className="conn-chevron" style={{ transform: openConn === r.id ? 'rotate(90deg)' : 'rotate(0deg)' }} />
                   </button>
@@ -863,30 +883,55 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                         className={`ai-profile${active ? ' active' : ''}`}
                         onClick={() => activateProfile(p)}
                       >
-                        <div className="ai-profile-head">
-                          <span className="ai-profile-name">{p.name}</span>
-                          {p.connected && (
-                            <span className="ai-profile-live">
-                              <span className="ai-profile-dot" /> Connected
-                            </span>
-                          )}
-                          {active && !p.connected && (
-                            <span className="ai-profile-activetag">ACTIVE</span>
-                          )}
-                        </div>
-                        <div className="ai-profile-sub">
-                          <span className="ai-profile-model">
-                            {PROVIDER_LABELS[p.provider]} · {p.model || '—'}
+                        <div className="ai-profile-main">
+                          <div className="ai-profile-nameline">
+                            <span className="ai-profile-name">{p.name}</span>
+                            {active && (
+                              <span className="ai-profile-live">
+                                <span className="ai-profile-dot" /> Connected
+                              </span>
+                            )}
+                          </div>
+                          <span className="ai-profile-sub">
+                            {PROVIDER_LABELS[p.provider]} · {p.model || '(no model)'}
                           </span>
+                          {(() => {
+                            const u = getUsage({
+                              provider: p.provider,
+                              model: p.model,
+                              apiKey: p.apiKey,
+                            })
+                            return (
+                              <span className="ai-profile-usage">
+                                Today: {u.calls} call{u.calls === 1 ? '' : 's'} ·{' '}
+                                {u.tokens.toLocaleString('en-US')} tokens
+                              </span>
+                            )
+                          })()}
+                        </div>
+                        <div className="ai-profile-side">
+                          {!active && (
+                            <button
+                              type="button"
+                              className="ai-profile-connect"
+                              onClick={(e) => {
+                                e.stopPropagation()
+                                activateProfile(p)
+                              }}
+                            >
+                              Connect
+                            </button>
+                          )}
                           <button
                             type="button"
                             className="ai-profile-del"
+                            title="Delete profile"
                             onClick={(e) => {
                               e.stopPropagation()
                               deleteProfile(p.id)
                             }}
                           >
-                            Delete
+                            <Icon name="trash" size={14} />
                           </button>
                         </div>
                       </div>
