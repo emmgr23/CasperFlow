@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Handle, Position, useReactFlow, useNodes, type NodeProps } from '@xyflow/react'
 import { CATEGORY_COLORS, moduleByType, defaultParams, statusOf, type ModuleCategory, type Params } from './modules'
 import { renderChips } from './chips'
-import { aiVarName } from './aiVars'
+import { aiVarName, agentBadge } from './aiVars'
 import { fetchCsprPrice } from './price'
 import { subscribeRuntime, getLiveSchedule } from './runtime'
 import WalletNodeFront from './WalletNodeFront'
@@ -162,6 +162,19 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
                 {aiVarName(allNodes, id).toUpperCase()}
               </span>
               {def.label.replace(/^ai\s+/i, '')}
+            </>
+          ) : d.moduleType === 'agent' ? (
+            <>
+              {/* The yellow AGENT / AGENT 1 / AGENT 2 badge REPLACES the word "Agent"
+                  at the end (no more "AGENT Autonomous Agent"), and matches the
+                  variable this agent exposes ({{agent}}, {{agent1}}, {{agent2}}). */}
+              {def.label.replace(/\s*agent\s*$/i, '')}
+              <span
+                className="agent-var-pill"
+                title="This agent's answer is available to later steps under this tag"
+              >
+                {agentBadge(allNodes, id)}
+              </span>
             </>
           ) : (
             def.label

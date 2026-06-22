@@ -6,7 +6,7 @@ import { fetchCsprPrice } from './price'
 import WalletNodeBack from './WalletNodeBack'
 import RecipientField from './RecipientField'
 import VariableInput from './VariableInput'
-import { AGENT_TOOLS } from './agentTools'
+import { AGENT_TOOLS, AGENT_ROLES } from './agentTools'
 import Icon from './Icon'
 import type { ModuleNodeData } from './ModuleNode'
 
@@ -67,6 +67,27 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
         <div key={p.key} className="node-field">
           <label>Recipient</label>
           <RecipientField params={params} setParams={setParams} />
+        </div>
+      )
+    }
+    // Autonomous Agent role: a dropdown of suggested roles that still allows a
+    // custom one (free text + <datalist>), so nobody has to guess what to type.
+    if (data.moduleType === 'agent' && p.key === 'role') {
+      return (
+        <div key={p.key} className="node-field">
+          <label>Role</label>
+          <input
+            type="text"
+            list="agent-roles-list"
+            placeholder="Pick one or write your own (e.g. Treasury operator)"
+            value={String(params.role ?? '')}
+            onChange={(e) => setParam('role', e.target.value)}
+          />
+          <datalist id="agent-roles-list">
+            {AGENT_ROLES.map((r) => (
+              <option key={r} value={r} />
+            ))}
+          </datalist>
         </div>
       )
     }

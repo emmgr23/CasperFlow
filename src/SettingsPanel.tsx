@@ -15,6 +15,7 @@ import {
 } from './wallets'
 import { askAi, fetchModels, probeToolSupport, AI_MODELS, PROVIDER_LABELS, type AiProvider } from './ai'
 import { getUsage, subscribeUsage } from './aiUsage'
+import { linkify } from './linkify'
 import Icon from './Icon'
 
 export interface AiProfile {
@@ -1088,7 +1089,7 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                   <div key={i} className="debug-line">
                     <span className="debug-time">{e.t}</span>
                     <span className={`debug-tag debug-tag-${e.tag}`}>{e.tag}</span>
-                    <span className="debug-msg">{e.msg}</span>
+                    <span className="debug-msg">{linkify(e.msg)}</span>
                   </div>
                 ))}
             </div>

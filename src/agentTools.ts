@@ -129,6 +129,24 @@ export const AGENT_TOOLS: AgentToolDef[] = [
 
 export const agentToolById = (id: string) => AGENT_TOOLS.find((t) => t.id === id)
 
+// Suggested roles for the Autonomous Agent. Shown as a dropdown, but the field
+// stays free-text so anyone can describe a custom role.
+export const AGENT_ROLES = [
+  'Autonomous treasury operator',
+  'Analyst',
+  'Executor',
+  'Risk officer',
+  'Compliance officer',
+  'Payroll manager',
+  'Portfolio manager',
+  'Trader',
+  'DCA bot',
+  'Treasury monitor',
+  'Auditor',
+  'Yield manager',
+  'Operations bot',
+]
+
 // Default tools for a new Autonomous Agent node.
 export const DEFAULT_AGENT_TOOLS = ['read_balance', 'get_price', 'send_cspr', 'attest']
 

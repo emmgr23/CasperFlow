@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactNode } from 'react'
 import { getDebugLog, subscribeRuntime, clearDebugLog } from './runtime'
+import { linkify } from './linkify'
 import Icon from './Icon'
 
 // A docked bottom console (VS Code / Xcode style) that streams EVERYTHING in
@@ -140,7 +141,7 @@ export default function ConsolePanel({
           <div key={i} className={`console-line ctag-${e.tag.replace(/:/g, '-')}`}>
             <span className="console-time">{e.t}</span>
             <span className="console-tag">{e.tag}</span>
-            <span className="console-msg">{e.msg}</span>
+            <span className="console-msg">{linkify(e.msg)}</span>
           </div>
         ))}
       </div>

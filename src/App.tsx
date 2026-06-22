@@ -21,6 +21,7 @@ import NoteNode from './NoteNode'
 import ContextMenu, { type MenuState } from './ContextMenu'
 import SettingsPanel, { DEFAULT_SETTINGS, type Settings } from './SettingsPanel'
 import WikiPanel from './WikiPanel'
+import JournalView from './JournalView'
 import WorkspaceBar from './WorkspaceBar'
 import TemplateGallery from './TemplateGallery'
 import { type AgentTemplate, buildFromSpecs, AGENT_TEMPLATES } from './templates'
@@ -41,7 +42,9 @@ import { payX402OnChain } from './x402'
 import { swapReal } from './swap'
 import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type WalletProfile } from './wallets'
 import { buildAttestation } from './attest'
-import { aiVarName } from './aiVars'
+import { aiVarName, agentVarName } from './aiVars'
+import { linkify } from './linkify'
+import { recordJournal } from './journal'
 import { fetchCsprPrice, getCsprPrice } from './price'
 import { getAccountBalance, getRecentTransfers, resolveCsprName, shortKey } from './casper'
 import Icon from './Icon'
@@ -494,6 +497,7 @@ function Flow() {
   const [confirmMainnet, setConfirmMainnet] = useState(false)
   const [paletteOpen, setPaletteOpen] = useState(true)
   const [showWiki, setShowWiki] = useState(false)
+  const [showJournal, setShowJournal] = useState(false)
   const [showGallery, setShowGallery] = useState(false)
   const [showConsole, setShowConsole] = useState(false)
   const [consoleHeight, setConsoleHeight] = useState(300)
@@ -2063,6 +2067,16 @@ function Flow() {
             await report('transfer', txRes)
             if (txRes.ok) {
               recordSpend(Number(params.amount))
+              recordJournal({
+                kind: 'transfer',
+                title: `Sent ${params.amount} CSPR to ${String(params.toName || to.slice(0, 10) + '…')}`,
+                amount: Number(params.amount),
+                to: String(params.toName || to),
+                hash: txRes.hash,
+                url: explorerTxUrl(net, txRes.hash || ''),
+                status: txFailed ? 'failed' : 'success',
+                net,
+              })
               addRecentTx(signerHex, {
                 hash: txRes.hash || '',
                 amount: Number(params.amount),
@@ -2445,7 +2459,7 @@ function Flow() {
             const toolSpecs = toolsFromParam(params.tools).map((t) => t.spec)
             const role = String(params.role || 'Autonomous on-chain agent')
             const goal =
-              String(params.goal || '').trim() ||
+              substituteVars(String(params.goal || '').trim(), bag) ||
               'Use your tools to inspect the wallet and report its status.'
             const system =
               `You are "${role}", an autonomous agent operating on the Casper ${net} network. ` +
@@ -2514,6 +2528,18 @@ function Flow() {
                   appendLog(`Agent sent ${amt} CSPR -> ${to.slice(0, 8)}… · ${url}`, 'info')
                   const ex = await awaitExecution(net, r.hash || '')
                   if (walletKey) refreshWalletBalance(walletKey)
+                  recordJournal({
+                    actor: role,
+                    kind: 'transfer',
+                    title: `Sent ${amt} CSPR to ${String(args.to)}`,
+                    amount: amt,
+                    to: String(args.to),
+                    hash: r.hash,
+                    url,
+                    status: ex.status,
+                    gasMotes: ex.cost,
+                    net,
+                  })
                   return `Sent ${amt} CSPR. On-chain status: ${ex.status}.${gasNote(ex.cost)} Proof: ${url}`
                 }
                 if (name === 'delegate') {
@@ -2537,7 +2563,18 @@ function Flow() {
                   }
                   recordSpend(amt)
                   didAct = true
-                  return `Delegated ${amt} CSPR. Proof: ${explorerTxUrl(net, r.hash || '')}`
+                  const durl = explorerTxUrl(net, r.hash || '')
+                  recordJournal({
+                    actor: role,
+                    kind: 'stake',
+                    title: `Delegated ${amt} CSPR to ${validator.slice(0, 10)}…`,
+                    amount: amt,
+                    hash: r.hash,
+                    url: durl,
+                    status: 'success',
+                    net,
+                  })
+                  return `Delegated ${amt} CSPR. Proof: ${durl}`
                 }
                 if (name === 'attest') {
                   const note = String(args.note || '').slice(0, 400)
@@ -2568,6 +2605,16 @@ function Flow() {
                   const url = explorerTxUrl(net, r.hash || '')
                   bag.attesturl = url
                   bag.txurl = url
+                  recordJournal({
+                    actor: role,
+                    kind: 'attest',
+                    title: `Anchored a proof on Casper: "${note.slice(0, 60)}"`,
+                    amount: amt,
+                    hash: r.hash,
+                    url,
+                    status: 'success',
+                    net,
+                  })
                   return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… (the 2.5 CSPR anchor went to your own wallet, recoverable, not a fee) Proof: ${url}`
                 }
                 return `Unknown tool: ${name}`
@@ -2596,12 +2643,8 @@ function Flow() {
               },
             })
             // Expose the agent's final answer so later agents/steps can use it:
-            // {{agent}}, {{agent2}}… (left-to-right order on the canvas).
-            const agentNodes = currentNodes
-              .filter((n) => (n.data as ModuleNodeData).moduleType === 'agent')
-              .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
-            const aidx = agentNodes.findIndex((n) => n.id === id)
-            bag[aidx <= 0 ? 'agent' : `agent${aidx + 1}`] = result.finalText || '(no output)'
+            // {{agent}}, {{agent2}}… (same ordering as the AGENT badge on the node).
+            bag[agentVarName(currentNodes, id)] = result.finalText || '(no output)'
             // An agent that errored (e.g. provider without tool calling) must show
             // red + stop the branch, not a green "done".
             if (result.stopped === 'error') {
@@ -2935,6 +2978,13 @@ function Flow() {
           >
             <span className="net-dot" />
             {settings.casperNet === 'mainnet' ? 'Mainnet' : 'Testnet'}
+          </button>
+          <button
+            className="btn-secondary btn-icon"
+            onClick={() => setShowJournal(true)}
+            title="A day-by-day diary of every on-chain action"
+          >
+            <Icon name="note" size={14} /> Journal
           </button>
           <span className="tb-div" />
           <button
@@ -3446,7 +3496,7 @@ function Flow() {
               {log.map((e, i) => (
                 <div key={i} className={`log-line log-${e.kind}`}>
                   <span className="log-time">{e.t}</span>
-                  <span className="log-text">{e.text}</span>
+                  <span className="log-text">{linkify(e.text)}</span>
                 </div>
               ))}
             </div>
@@ -3575,6 +3625,21 @@ function Flow() {
         </div>
       )}
       {showWiki && <WikiPanel onClose={() => setShowWiki(false)} />}
+      {showJournal && (
+        <JournalView
+          onClose={() => setShowJournal(false)}
+          aiConfig={
+            settings.aiKey
+              ? {
+                  provider: settings.aiProvider,
+                  apiKey: settings.aiKey,
+                  model: settings.aiModel,
+                  baseUrl: settings.aiBaseUrl,
+                }
+              : undefined
+          }
+        />
+      )}
       {confirmMainnet && (
         <div className="confirm-overlay" onClick={() => setConfirmMainnet(false)}>
           <div className="confirm-modal" onClick={(e) => e.stopPropagation()}>

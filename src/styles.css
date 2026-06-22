@@ -704,6 +704,9 @@ body {
 }
 .node-desc {
   font-size: calc(11.5px * var(--ui-scale, 1)); margin-top: 5px; color: #94a3b8;
+  /* Show the FULL text on the canvas: wrap (incl. long words / URLs) and let the
+     node card grow to fit, so the whole flow is readable without opening Properties. */
+  white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.4;
 }
 .help-hint {
   position: fixed; z-index: 400; pointer-events: none;
@@ -732,11 +735,21 @@ body {
   border-radius: 10px; font-family: 'SF Mono', Menlo, monospace;
   font-size: 12px; line-height: 1.55; color: #cbd5e1; white-space: pre;
 }
+/* AI decision badge: the Logic orange (same hue as the node icon). */
 .ai-var-pill {
-  margin-left: 6px; font-family: 'SF Mono', Menlo, monospace;
-  font-size: calc(10px * var(--ui-scale, 1)); font-weight: 600;
-  color: #c4b5fd; background: rgba(167, 139, 250, 0.15);
-  padding: 1px 6px; border-radius: 6px; flex-shrink: 0;
+  display: inline-flex; align-items: center; line-height: 1;
+  margin-left: 2px; font-family: 'SF Mono', Menlo, monospace;
+  font-size: calc(10px * var(--ui-scale, 1)); font-weight: 700;
+  color: #fdba74; background: rgba(251, 146, 60, 0.16);
+  padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
+}
+/* Agent badge: the AI Agent yellow (same hue as the node icon). */
+.agent-var-pill {
+  display: inline-flex; align-items: center; line-height: 1;
+  margin-left: 2px; font-family: 'SF Mono', Menlo, monospace;
+  font-size: calc(10px * var(--ui-scale, 1)); font-weight: 700; letter-spacing: 0.3px;
+  color: #facc15; background: rgba(250, 204, 21, 0.16);
+  padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
 }
 .ai-output-note {
   font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 16px;
@@ -1563,6 +1576,116 @@ body {
   font-size: 10.5px; letter-spacing: 0.4px; padding-top: 1px;
 }
 .console-msg { color: #cbd5e1; flex: 1; }
+/* Clickable explorer links inside any log line. */
+.log-link {
+  color: #67e8f9; text-decoration: none; word-break: break-all;
+  border-bottom: 1px solid rgba(103, 232, 249, 0.35);
+}
+.log-link:hover { color: #a5f3fc; border-bottom-color: rgba(165, 243, 252, 0.8); }
+
+/* ── Journal (day-by-day on-chain diary) ───────────────────── */
+.journal-overlay {
+  position: fixed; inset: 0; z-index: 200;
+  background: #080c14; display: flex;
+}
+.journal-modal {
+  width: 100%; height: 100%;
+  display: flex; flex-direction: column; background: #0d1320;
+}
+.journal-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.journal-title { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; color: #e2e8f0; }
+.journal-sub { color: #64748b; font-size: 12.5px; }
+.journal-close { margin-left: auto; background: none; border: none; color: #94a3b8; cursor: pointer; padding: 6px; border-radius: 8px; }
+.journal-close:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
+.journal-body { flex: 1; display: flex; min-height: 0; }
+.journal-cal {
+  width: 340px; flex-shrink: 0; padding: 18px;
+  border-right: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex; flex-direction: column; gap: 14px;
+}
+/* Horizontal year wheel. */
+.journal-years {
+  display: flex; gap: 6px; overflow-x: auto; padding-bottom: 6px;
+  scroll-snap-type: x proximity;
+}
+.journal-years::-webkit-scrollbar { height: 6px; }
+.journal-years::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+.journal-year {
+  flex: 0 0 auto; scroll-snap-align: center;
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #94a3b8; padding: 5px 13px; border-radius: 8px; cursor: pointer; font-size: 13px; font-weight: 600;
+}
+.journal-year:hover { background: rgba(255, 255, 255, 0.1); color: #e2e8f0; }
+.journal-year.selected { background: rgba(139, 92, 246, 0.28); border-color: rgba(167, 139, 250, 0.6); color: #ede9fe; }
+/* 12 months, always visible. */
+.journal-months { display: grid; grid-template-columns: repeat(3, 1fr); gap: 5px; }
+.journal-month {
+  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08);
+  color: #cbd5e1; padding: 8px 0; border-radius: 8px; cursor: pointer; font-size: 12px; font-weight: 500;
+}
+.journal-month:hover { background: rgba(255, 255, 255, 0.09); }
+.journal-month.selected { background: rgba(139, 92, 246, 0.24); border-color: rgba(167, 139, 250, 0.55); color: #ede9fe; }
+.journal-cal-label { flex: 1; text-align: center; font-weight: 600; font-size: 13.5px; color: #e2e8f0; }
+.journal-cal-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 3px; }
+.journal-cal-dow { text-align: center; font-size: 10.5px; color: #64748b; padding: 3px 0; font-weight: 600; }
+.journal-cal-blank { aspect-ratio: 1; }
+.journal-cal-day {
+  position: relative; aspect-ratio: 1; border: none; border-radius: 8px;
+  background: rgba(255, 255, 255, 0.03); color: #cbd5e1; cursor: pointer; font-size: 12.5px;
+}
+.journal-cal-day:hover { background: rgba(255, 255, 255, 0.09); }
+.journal-cal-day.today { box-shadow: inset 0 0 0 1px rgba(148, 163, 184, 0.5); }
+.journal-cal-day.selected {
+  background: rgba(139, 92, 246, 0.28); color: #ede9fe;
+  box-shadow: inset 0 0 0 1px rgba(167, 139, 250, 0.6);
+}
+.journal-cal-dot {
+  position: absolute; bottom: 4px; left: 50%; transform: translateX(-50%);
+  width: 5px; height: 5px; border-radius: 50%; background: #34d399;
+}
+.journal-today-btn {
+  margin-top: auto; align-self: flex-start; font-size: 12px;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12);
+  color: #cbd5e1; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+}
+.journal-today-btn:hover { background: rgba(255, 255, 255, 0.1); }
+.journal-detail { flex: 1; overflow-y: auto; padding: 20px 24px; min-width: 0; }
+.journal-detail-head { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; margin-bottom: 14px; }
+.journal-detail-head h3 { margin: 0; font-size: 17px; color: #f1f5f9; font-weight: 700; }
+.journal-count { font-size: 12px; color: #64748b; }
+.journal-story-btn {
+  margin-left: auto; display: inline-flex; align-items: center; gap: 6px; font-size: 12.5px;
+  background: rgba(167, 139, 250, 0.14); border: 1px solid rgba(167, 139, 250, 0.4);
+  color: #c4b5fd; padding: 6px 12px; border-radius: 8px; cursor: pointer;
+}
+.journal-story-btn:hover:not(:disabled) { background: rgba(167, 139, 250, 0.22); }
+.journal-story {
+  font-size: 13.5px; line-height: 1.6; color: #cbd5e1; white-space: pre-wrap;
+  background: rgba(167, 139, 250, 0.07); border: 1px solid rgba(167, 139, 250, 0.18);
+  border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
+}
+.journal-empty { color: #64748b; font-size: 13.5px; padding: 30px 0; text-align: center; }
+.journal-entries { display: flex; flex-direction: column; gap: 10px; }
+.journal-entry {
+  display: flex; gap: 14px; padding: 12px 14px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
+}
+.journal-entry-time { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; color: #64748b; flex-shrink: 0; padding-top: 2px; }
+.journal-entry-body { flex: 1; min-width: 0; }
+.journal-entry-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: #e2e8f0; }
+.journal-entry-text { font-weight: 500; }
+.journal-kind {
+  font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
+  padding: 1px 7px; border-radius: 999px; color: #93c5fd; background: rgba(96, 165, 250, 0.16);
+}
+.journal-status { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+.js-success { color: #86efac; background: rgba(74, 222, 128, 0.15); }
+.js-failed { color: #fca5a5; background: rgba(248, 113, 113, 0.16); }
+.js-pending { color: #fcd34d; background: rgba(250, 204, 21, 0.14); }
+.journal-entry-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 12px; color: #94a3b8; }
 .console-line.ctag-error .console-tag,
 .console-line.ctag-console-error .console-tag { color: #f87171; }
 .console-line.ctag-error .console-msg,

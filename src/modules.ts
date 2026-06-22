@@ -199,7 +199,10 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
 }
 export const statusOf = (type: string): ModuleStatus => MODULE_STATUS[type] ?? 'soon'
 
-const trunc = (s: string, n = 36) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
+// Default is generous so descriptive text (AI instruction, agent goal, messages…)
+// shows in full on the canvas and the node grows to fit. Compact embedded fields
+// pass an explicit small n to stay short.
+const trunc = (s: string, n = 1000) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
 import { getCsprPrice } from './price'
 import { sendTelegram, sendDiscord, isDiscordWebhook } from './notify'
@@ -2019,7 +2022,7 @@ export const MODULES: ModuleDef[] = [
       { key: 'channel', label: 'Channel', type: 'select', options: ['Telegram', 'Email'], default: 'Telegram' },
       { key: 'message', label: 'Message', type: 'text', default: 'CSPR is at ${{price}} — your agent acted at {{time}}' },
     ],
-    describe: (p) => `${p.channel}: "${trunc(String(p.message), 26)}"`,
+    describe: (p) => `${p.channel}: "${trunc(String(p.message))}"`,
     simulate: async (p, ctx) => {
       if (p.channel === 'Telegram' && ctx.telegramToken && ctx.telegramChatId) {
         const ok = await sendTelegram(ctx.telegramToken, ctx.telegramChatId, String(p.message))
@@ -2041,7 +2044,7 @@ export const MODULES: ModuleDef[] = [
       { key: 'webhook', label: 'Webhook URL', type: 'text', default: 'discord.com/api/webhooks/…' },
       { key: 'message', label: 'Message', type: 'text', default: 'Agent report: action taken' },
     ],
-    describe: (p) => `Discord: "${trunc(String(p.message), 24)}"`,
+    describe: (p) => `Discord: "${trunc(String(p.message))}"`,
     simulate: async (p, ctx) => {
       const url = isDiscordWebhook(String(p.webhook))
         ? String(p.webhook)
