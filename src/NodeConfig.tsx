@@ -12,7 +12,7 @@ import type { ModuleNodeData } from './ModuleNode'
 
 // Full configuration UI for one node — rendered in the right-side inspector panel.
 export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeData }) {
-  const { updateNodeData } = useReactFlow()
+  const { updateNodeData, getEdges } = useReactFlow()
   const allNodes = useNodes()
   const def = moduleByType(data.moduleType)
   const isPrice = data.moduleType === 'price'
@@ -44,6 +44,36 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
   const setParams = (patch: Record<string, string | number>) =>
     updateNodeData(id, { params: { ...params, ...patch } })
 
+  // Pre-run safety: for a Send CSPR node, find the wallet that will sign (the
+  // nearest Wallet node upstream) so we can warn — at config time, before any
+  // run — if the recipient is that same wallet (Casper rejects self-transfers
+  // as "Invalid purse"). Catching it here avoids a wasted run.
+  const upstreamWallet = (() => {
+    if (data.moduleType !== 'transfer') return null
+    const edges = getEdges()
+    const visited = new Set<string>()
+    let frontier = edges.filter((e) => e.target === id).map((e) => e.source)
+    while (frontier.length) {
+      const next: string[] = []
+      for (const sid of frontier) {
+        if (visited.has(sid)) continue
+        visited.add(sid)
+        const n = allNodes.find((x) => x.id === sid)
+        const nd = n?.data as ModuleNodeData | undefined
+        if (nd?.moduleType === 'wallet') {
+          const wp = nd.params || {}
+          return { name: String(wp.walletName || 'this wallet'), pub: String(wp.walletPublic || '') }
+        }
+        edges.filter((e) => e.target === sid).forEach((e) => next.push(e.source))
+      }
+      frontier = next
+    }
+    return null
+  })()
+  const recipientTo = String(params.to ?? '').trim().toLowerCase()
+  const isSelfTransfer =
+    !!upstreamWallet?.pub && !!recipientTo && recipientTo === upstreamWallet.pub.toLowerCase()
+
   // Variables offered as one-click "Insert" chips. AI outputs (ai, ai2, …) are
   // added dynamically. An AI node only sees the AIs BEFORE it (so they can feed
   // each other in the right order); other actions see them all.
@@ -67,6 +97,16 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
         <div key={p.key} className="node-field">
           <label>Recipient</label>
           <RecipientField params={params} setParams={setParams} />
+          {isSelfTransfer && (
+            <div className="field-warn">
+              <Icon name="shield" size={13} />
+              <span>
+                This recipient is the same wallet that signs ({upstreamWallet?.name}). Casper rejects
+                sending to your own purse (&quot;Invalid purse&quot;), so this transfer will be blocked.
+                Choose a different recipient.
+              </span>
+            </div>
+          )}
         </div>
       )
     }
@@ -214,7 +254,7 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
               </button>
             </div>
           </div>
-        ) : /(message|instruction|data|args|prompt|question)/i.test(p.key) ? (
+        ) : /(message|instruction|data|args|prompt|question|goal)/i.test(p.key) ? (
           <>
             <VariableInput
               multiline

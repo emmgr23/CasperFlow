@@ -95,6 +95,37 @@ export default function JournalView({
 
   const dayEntries = byDay[selected] || []
 
+  // ── Filters ────────────────────────────────────────────
+  const [fStatus, setFStatus] = useState<'all' | 'success' | 'blocked' | 'failed'>('all')
+  const [fKind, setFKind] = useState<string>('all')
+  const [fMin, setFMin] = useState('')
+  const [fMax, setFMax] = useState('')
+  const [fText, setFText] = useState('')
+  const filtersOn = fStatus !== 'all' || fKind !== 'all' || fMin !== '' || fMax !== '' || fText !== ''
+  const resetFilters = () => {
+    setFStatus('all')
+    setFKind('all')
+    setFMin('')
+    setFMax('')
+    setFText('')
+  }
+  const filtered = useMemo(() => {
+    const min = fMin === '' ? null : Number(fMin)
+    const max = fMax === '' ? null : Number(fMax)
+    const q = fText.trim().toLowerCase()
+    return dayEntries.filter((e) => {
+      if (fStatus !== 'all' && e.status !== fStatus) return false
+      if (fKind !== 'all' && e.kind !== fKind) return false
+      if (min != null && !(e.amount != null && e.amount >= min)) return false
+      if (max != null && !(e.amount != null && e.amount <= max)) return false
+      if (q) {
+        const hay = `${e.title} ${e.to ?? ''} ${e.from ?? ''} ${e.actor ?? ''}`.toLowerCase()
+        if (!hay.includes(q)) return false
+      }
+      return true
+    })
+  }, [dayEntries, fStatus, fKind, fMin, fMax, fText])
+
   const grid = useMemo(() => {
     const first = new Date(viewY, viewM, 1)
     const startDow = (first.getDay() + 6) % 7 // Monday = 0
@@ -106,15 +137,12 @@ export default function JournalView({
     return cells
   }, [viewY, viewM])
 
-  // Years for the horizontal wheel: from the earliest recorded year (or 5 back)
-  // up to next year.
+  // Years shown in the wheel: the current year plus the next three, so they all
+  // fit on one line with no scroll bar (e.g. 2026, 2027, 2028, 2029).
   const years = useMemo(() => {
-    let min = new Date().getFullYear() - 5
-    for (const e of entries) min = Math.min(min, new Date(e.time).getFullYear())
-    const arr: number[] = []
-    for (let y = min; y <= new Date().getFullYear() + 1; y++) arr.push(y)
-    return arr
-  }, [entries])
+    const y0 = new Date().getFullYear()
+    return [y0, y0 + 1, y0 + 2, y0 + 3]
+  }, [])
 
   const goToday = () => {
     const t = new Date()
@@ -227,7 +255,8 @@ export default function JournalView({
             <div className="journal-detail-head">
               <h3>{longDate}</h3>
               <span className="journal-count">
-                {dayEntries.length} action{dayEntries.length === 1 ? '' : 's'}
+                {filtersOn ? `${filtered.length} of ${dayEntries.length}` : dayEntries.length} action
+                {(filtersOn ? filtered.length : dayEntries.length) === 1 ? '' : 's'}
               </span>
               {aiConfig && dayEntries.length > 0 && (
                 <button className="journal-story-btn" onClick={tellStory} disabled={storyLoading}>
@@ -235,11 +264,70 @@ export default function JournalView({
                 </button>
               )}
             </div>
+
+            {dayEntries.length > 0 && (
+              <div className="journal-filters">
+                <div className="jf-status">
+                  {(['all', 'success', 'blocked', 'failed'] as const).map((s) => (
+                    <button
+                      key={s}
+                      className={`jf-pill${fStatus === s ? ' active' : ''}`}
+                      onClick={() => setFStatus(s)}
+                    >
+                      {s === 'all' ? 'All' : s.charAt(0).toUpperCase() + s.slice(1)}
+                    </button>
+                  ))}
+                </div>
+                <select className="jf-select" value={fKind} onChange={(e) => setFKind(e.target.value)}>
+                  <option value="all">All types</option>
+                  <option value="transfer">Transfer</option>
+                  <option value="attest">Attest</option>
+                  <option value="stake">Stake</option>
+                  <option value="x402">x402</option>
+                  <option value="deploy">Deploy</option>
+                  <option value="mint">Mint</option>
+                  <option value="other">Other</option>
+                </select>
+                <div className="jf-range">
+                  <input
+                    className="jf-num"
+                    type="number"
+                    placeholder="min"
+                    value={fMin}
+                    onChange={(e) => setFMin(e.target.value)}
+                  />
+                  <span>–</span>
+                  <input
+                    className="jf-num"
+                    type="number"
+                    placeholder="max"
+                    value={fMax}
+                    onChange={(e) => setFMax(e.target.value)}
+                  />
+                  <span className="jf-unit">CSPR</span>
+                </div>
+                <input
+                  className="jf-search"
+                  type="text"
+                  placeholder="Search recipient, agent…"
+                  value={fText}
+                  onChange={(e) => setFText(e.target.value)}
+                />
+                {filtersOn && (
+                  <button className="jf-reset" onClick={resetFilters}>
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
+
             {dayEntries.length === 0 ? (
               <div className="journal-empty">Nothing happened on this day.</div>
+            ) : filtered.length === 0 ? (
+              <div className="journal-empty">No actions match these filters.</div>
             ) : (
               <div className="journal-entries">
-                {dayEntries.map((e) => (
+                {filtered.map((e) => (
                   <div key={e.id} className="journal-entry">
                     <div className="journal-entry-time">
                       {new Date(e.time).toLocaleTimeString('en-GB', {
@@ -247,9 +335,11 @@ export default function JournalView({
                         minute: '2-digit',
                       })}
                     </div>
+                    <div className="journal-kind-col">
+                      <span className={`journal-kind kind-${e.kind}`}>{e.kind}</span>
+                    </div>
                     <div className="journal-entry-body">
                       <div className="journal-entry-title">
-                        <span className={`journal-kind kind-${e.kind}`}>{e.kind}</span>
                         <span className="journal-entry-text">{e.title}</span>
                         <span className={`journal-status js-${e.status}`}>{e.status}</span>
                       </div>

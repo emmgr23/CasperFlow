@@ -484,6 +484,20 @@ body {
 .log-clear:hover { background: rgba(248, 113, 113, 0.16); border-color: rgba(248, 113, 113, 0.4); color: #fca5a5; }
 .log-clear:disabled { opacity: 0.4; cursor: default; }
 .log { flex: 1; overflow-y: auto; }
+/* The log fills the panel; the "Explain run" button floats in the bottom-right
+   corner as a separate, optional action (kept out of the tab bar). */
+.log-wrap { position: relative; flex: 1; min-height: 0; display: flex; }
+.log-wrap .log { flex: 1; }
+.log-explain-fab {
+  position: absolute; right: 12px; bottom: 12px; z-index: 6;
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 12px; font-weight: 600; color: #c4b5fd; cursor: pointer;
+  background: rgba(24, 24, 42, 0.92); border: 1px solid rgba(167, 139, 250, 0.35);
+  border-radius: 9px; padding: 7px 11px;
+  backdrop-filter: blur(6px); -webkit-backdrop-filter: blur(6px);
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.45);
+}
+.log-explain-fab:hover { background: rgba(167, 139, 250, 0.22); color: #ede9fe; }
 .log-line {
   font-family: 'SF Mono', Menlo, Consolas, monospace;
   font-size: 11.5px; line-height: 1.55; padding: 6px 9px; margin-bottom: 5px;
@@ -637,6 +651,14 @@ body {
 .field-vars {
   display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 6px;
 }
+/* Inline config-time warning (e.g. recipient equals the signing wallet). */
+.field-warn {
+  display: flex; align-items: flex-start; gap: 8px; margin-top: 10px;
+  padding: 9px 11px; border-radius: 9px; font-size: 12px; line-height: 1.45;
+  color: #fca5a5; background: rgba(248, 113, 113, 0.1);
+  border: 1px solid rgba(248, 113, 113, 0.3);
+}
+.field-warn svg { flex-shrink: 0; margin-top: 1px; }
 .field-vars-label {
   font-size: calc(9.5px * var(--ui-scale, 1)); color: #64748b; margin-right: 2px;
 }
@@ -1722,6 +1744,10 @@ body {
   background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
 }
 .journal-entry-time { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; color: #64748b; flex-shrink: 0; padding-top: 2px; }
+/* Fixed-width column for the kind badge, so the title text and the meta line
+   (amount / from-to / "by …") line up at the same x in every row, with or
+   without an amount. */
+.journal-kind-col { flex-shrink: 0; width: 64px; padding-top: 1px; }
 .journal-entry-body { flex: 1; min-width: 0; }
 .journal-entry-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: #e2e8f0; }
 .journal-entry-text { font-weight: 500; }
@@ -1733,10 +1759,40 @@ body {
 .js-success { color: #86efac; background: rgba(74, 222, 128, 0.15); }
 .js-failed { color: #fca5a5; background: rgba(248, 113, 113, 0.16); }
 .js-pending { color: #fcd34d; background: rgba(250, 204, 21, 0.14); }
+.js-blocked { color: #fdba74; background: rgba(251, 146, 60, 0.16); }
 .journal-entry-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 12px; color: #94a3b8; }
 .journal-entry-meta strong { color: #cbd5e1; font-weight: 600; }
 .journal-actor { color: #facc15; }
 .journal-usd { color: #64748b; }
+
+/* Filter bar above the day's entries. */
+.journal-filters {
+  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  margin: 4px 0 16px; padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+.jf-status { display: inline-flex; gap: 2px; background: rgba(255, 255, 255, 0.04); border-radius: 9px; padding: 2px; }
+.jf-pill {
+  font-size: 12px; font-weight: 600; color: #94a3b8; cursor: pointer;
+  background: transparent; border: none; padding: 5px 11px; border-radius: 7px; transition: background 0.12s, color 0.12s;
+}
+.jf-pill:hover { color: #e2e8f0; }
+.jf-pill.active { background: rgba(167, 139, 250, 0.22); color: #ddd6fe; }
+.jf-select, .jf-num, .jf-search {
+  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1);
+  color: #e2e8f0; border-radius: 8px; padding: 6px 9px; font-size: 12.5px;
+}
+.jf-select:focus, .jf-num:focus, .jf-search:focus { outline: none; border-color: rgba(167, 139, 250, 0.55); }
+.jf-range { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; }
+.jf-num { width: 64px; }
+.jf-num::-webkit-inner-spin-button { opacity: 0.4; }
+.jf-unit { color: #64748b; font-size: 11.5px; }
+.jf-search { min-width: 180px; flex: 1; }
+.jf-reset {
+  font-size: 12px; color: #fca5a5; cursor: pointer; background: transparent;
+  border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 6px 11px;
+}
+.jf-reset:hover { background: rgba(248, 113, 113, 0.12); }
 .console-line.ctag-error .console-tag,
 .console-line.ctag-console-error .console-tag { color: #f87171; }
 .console-line.ctag-error .console-msg,
@@ -2116,14 +2172,14 @@ body {
 /* ── Right panel: tabbed Properties / Log ────────────────── */
 .rightpanel-tabs {
   display: flex; align-items: center; justify-content: space-between; gap: 8px;
-  padding: 8px 10px; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
+  padding: 8px 6px 8px 12px; border-bottom: 1px solid rgba(255, 255, 255, 0.07);
 }
 /* Primary navigation: clean ghost tabs (no box) */
 .rp-tabgroup { display: inline-flex; gap: 20px; min-width: 0; }
 /* Underline tabs (same design as the Setup / Activity tabs) with a bright cyan accent. */
 .rp-tab {
   position: relative;
-  display: inline-flex; align-items: center; gap: 7px;
+  display: inline-flex; align-items: center; gap: 7px; white-space: nowrap; flex-shrink: 0;
   background: none; border: none; border-radius: 0; cursor: pointer;
   font-size: 13px; font-weight: 600; padding: 6px 2px 9px; color: #64748b;
   transition: color 0.12s;

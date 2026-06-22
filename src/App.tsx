@@ -2464,7 +2464,9 @@ function Flow() {
             const isKey = (s: string) => /^01[0-9a-fA-F]{64}$/.test(s) || /^02[0-9a-fA-F]{66}$/.test(s)
             const isHash = (s: string) => /^[0-9a-fA-F]{64}$/.test(s)
             const cloud = settingsRef.current.csprCloudKey || ''
-            const toolSpecs = toolsFromParam(params.tools).map((t) => t.spec)
+            const enabledTools = toolsFromParam(params.tools)
+            const toolSpecs = enabledTools.map((t) => t.spec)
+            const hasSigningTool = enabledTools.some((t) => t.signs)
             const role = String(params.role || 'Autonomous on-chain agent')
             // Tie each journal line to the agent badge on the canvas (Agent 1 / Agent 2)
             // so a multi-agent run reads as "who did what".
@@ -2480,12 +2482,27 @@ function Flow() {
               `You are "${role}", an autonomous agent operating on the Casper ${net} network. ` +
               'Pursue the goal by calling the available tools: think, call one or more tools, read the ' +
               'results, and continue until the goal is met, then give a short final summary. ' +
-              'You sign REAL transactions. Never do more than the goal asks. Some tools are guarded by a ' +
-              'spend limit and may be blocked or need approval; if a tool is refused or blocked, stop and ' +
-              'explain rather than retrying. Amounts are in CSPR. Be concise.'
+              'You sign REAL transactions. Never do more than the goal asks. Use ONLY the exact ' +
+              'recipient, amount and validator named in the goal. ' +
+              'If a tool call is refused, blocked, or fails, STOP immediately. Do NOT work around it: ' +
+              'do not change the recipient, amount, or validator, do not pick a different account, and do ' +
+              'not retry. Report exactly what was refused and end. ' +
+              'Amounts are in CSPR. Be concise.'
 
+            // HARD guardrail: once a signing action is blocked (self-transfer or
+            // spend limit), lock all further signing for this run. A soft prompt
+            // instruction is not enough — models will try to work around a refusal
+            // by changing the recipient. This makes that impossible.
+            let signingLocked = false
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
+              // Some models pass `null` (not `{}`) when a tool takes no required
+              // args; guard so reading args.* never throws.
+              args = args ?? {}
               try {
+                const isSigning = name === 'send_cspr' || name === 'delegate' || name === 'attest'
+                if (isSigning && signingLocked) {
+                  return 'Signing is locked for this run: a previous action was blocked by a guardrail. The agent may not sign anything else now. Stop and report.'
+                }
                 // An Autonomous Agent must sign LOCALLY (no popup). If there is no
                 // local signer, refuse rather than fall back to the Casper Wallet
                 // extension (wrong account + unreliable). Reads are still fine.
@@ -2497,7 +2514,8 @@ function Flow() {
                   return p != null ? `CSPR price: $${p}` : 'Price unavailable.'
                 }
                 if (name === 'read_balance') {
-                  const acct = String(args.account || signerHex)
+                  const acct = String((args.account ?? '') || signerHex || '').trim()
+                  if (!acct) return 'No account to read: no account given and no wallet is connected.'
                   const a = isKey(acct) || isHash(acct) ? acct : resolveRecipientWallet(acct)?.publicHex || acct
                   const info = await getAccountBalance(net, cloud, a)
                   return info ? `Balance of ${shortKey(a)}: ${info.balance} CSPR` : 'Could not read balance.'
@@ -2526,14 +2544,51 @@ function Flow() {
                   const amt = Number(args.amount)
                   if (!(amt > 0)) return 'Refused: amount must be a positive number of CSPR.'
                   if (!isKey(to) && !isHash(to)) return `Refused: "${String(args.to)}" is not a valid recipient.`
-                  if (signerHex && to.toLowerCase() === signerHex.toLowerCase())
-                    return 'Refused: cannot send to the same wallet that signs (Casper rejects self-transfers as "Invalid purse"). Choose a different recipient.'
-                  if (!enforceSpend(amt, 'Agent send'))
-                    return `Blocked by spend limit: sending ${amt} CSPR would exceed the cap.`
+                  if (signerHex && to.toLowerCase() === signerHex.toLowerCase()) {
+                    signingLocked = true
+                    recordJournal({
+                      actor: agentActor,
+                      kind: 'transfer',
+                      title: `Blocked self-transfer: ${amt} CSPR to ${String(args.to)}`,
+                      amount: amt,
+                      usd: getCsprPrice() ?? undefined,
+                      from: walletNameForAction || undefined,
+                      to: String(args.to),
+                      status: 'blocked',
+                      net,
+                    })
+                    return 'Refused: cannot send to the same wallet that signs (Casper rejects self-transfers as "Invalid purse"). Signing is now locked for this run; do not try another recipient. Stop.'
+                  }
+                  if (!enforceSpend(amt, 'Agent send')) {
+                    signingLocked = true
+                    recordJournal({
+                      actor: agentActor,
+                      kind: 'transfer',
+                      title: `Blocked by spend limit: send ${amt} CSPR to ${String(args.to)}`,
+                      amount: amt,
+                      usd: getCsprPrice() ?? undefined,
+                      from: walletNameForAction || undefined,
+                      to: String(args.to),
+                      status: 'blocked',
+                      net,
+                    })
+                    return `Blocked by spend limit: sending ${amt} CSPR would exceed the cap. Signing is now locked for this run; do not try another recipient or amount. Stop.`
+                  }
                   if (!(await confirmIfNeeded('Agent: Send CSPR', `${amt} CSPR -> ${to.slice(0, 8)}…`)))
                     return 'Refused by the user.'
                   const r = await sendCsprReal({ net, senderHex: signerHex, recipientHex: to, amountCspr: amt })
                   if (!r.ok) {
+                    recordJournal({
+                      actor: agentActor,
+                      kind: 'transfer',
+                      title: `Transfer failed: ${amt} CSPR to ${String(args.to)}`,
+                      amount: amt,
+                      usd: getCsprPrice() ?? undefined,
+                      from: walletNameForAction || undefined,
+                      to: String(args.to),
+                      status: 'failed',
+                      net,
+                    })
                     branchStops = true
                     return `Transfer failed: ${r.error}`
                   }
@@ -2567,7 +2622,10 @@ function Flow() {
                   const amt = Number(args.amount)
                   if (!isKey(validator)) return 'Refused: validator must be a public key.'
                   if (!(amt > 0)) return 'Refused: amount must be positive.'
-                  if (!enforceSpend(amt, 'Agent delegate')) return 'Blocked by spend limit.'
+                  if (!enforceSpend(amt, 'Agent delegate')) {
+                    signingLocked = true
+                    return 'Blocked by spend limit. Signing is now locked for this run; stop.'
+                  }
                   if (!(await confirmIfNeeded('Agent: Delegate', `${amt} CSPR · ${validator.slice(0, 8)}…`)))
                     return 'Refused by the user.'
                   const r = await delegateReal({
@@ -2613,7 +2671,10 @@ function Flow() {
                       .find((h) => h && h.toLowerCase() !== signerHex.toLowerCase()) || ''
                   if (!anchorTo)
                     return 'Cannot attest: add a second saved wallet (Casper forbids self-transfers).'
-                  if (!enforceSpend(amt, 'Agent attest')) return 'Blocked by spend limit.'
+                  if (!enforceSpend(amt, 'Agent attest')) {
+                    signingLocked = true
+                    return 'Blocked by spend limit. Signing is now locked for this run; stop.'
+                  }
                   if (!(await confirmIfNeeded('Agent: Attest', `"${note.slice(0, 24)}…"`)))
                     return 'Refused by the user.'
                   const r = await sendCsprReal({
@@ -2682,16 +2743,39 @@ function Flow() {
             // An agent that errored (e.g. provider without tool calling) must show
             // red + stop the branch, not a green "done".
             if (result.stopped === 'error') {
+              recordJournal({
+                actor: agentActor,
+                kind: 'other',
+                title: `Agent run failed: ${result.finalText?.slice(0, 80) || 'error'}`,
+                status: 'failed',
+                net,
+              })
               txFailed = true
               branchStops = true
             } else if (toolCallCount === 0) {
-              // The model answered but never actually called a tool (it only said
-              // it would). Almost always the provider didn't pass the tool
-              // definitions through (e.g. an OpenAI-compatible proxy that drops them).
-              appendLog(
-                '⚠️ The agent answered without calling any tool — it did not actually read or do anything. Your AI provider is likely not passing tool definitions. Use a tool-capable provider (Groq is free, or Claude / OpenAI direct).',
-                'warn',
-              )
+              // The model answered but never actually called a tool. Two common
+              // causes: (1) the goal needs an action tool that isn't enabled on
+              // this agent, or (2) the provider drops tool definitions.
+              if (!hasSigningTool) {
+                appendLog(
+                  '⚠️ The agent did nothing because it has no action tool enabled. Its goal needs a signing tool (e.g. Send CSPR), but only read-only tools are turned on. Enable the tool you need in the agent\'s Tools picker (click the Send CSPR ⚡ chip), then run again.',
+                  'warn',
+                )
+              } else {
+                appendLog(
+                  '⚠️ The agent answered without calling any tool — it did not actually read or do anything. Your AI provider is likely not passing tool definitions. Use a tool-capable provider (Groq is free, or Claude / OpenAI direct).',
+                  'warn',
+                )
+              }
+              recordJournal({
+                actor: agentActor,
+                kind: 'other',
+                title: hasSigningTool
+                  ? 'Agent did nothing: no tool was called (provider may not pass tools)'
+                  : 'Agent could not act: no signing tool enabled (e.g. Send CSPR)',
+                status: 'failed',
+                net,
+              })
               txFailed = true
               branchStops = true
             }
@@ -3445,9 +3529,6 @@ function Flow() {
             <div className="rp-actions">
               {rightTab === 'log' && (
                 <>
-                  <button className="rp-action" onClick={explainRun} title="AI explains this run">
-                    <Icon name="sparkles" size={15} />
-                  </button>
                   {clearedLogs.length > 0 && (
                     <button
                       className="rp-action"
@@ -3525,13 +3606,24 @@ function Flow() {
               )
             })()
           ) : (
-            <div className="log" ref={logRef}>
-              {log.map((e, i) => (
-                <div key={i} className={`log-line log-${e.kind}`}>
-                  <span className="log-time">{e.t}</span>
-                  <span className="log-text">{linkify(e.text)}</span>
-                </div>
-              ))}
+            <div className="log-wrap">
+              <div className="log" ref={logRef}>
+                {log.map((e, i) => (
+                  <div key={i} className={`log-line log-${e.kind}`}>
+                    <span className="log-time">{e.t}</span>
+                    <span className="log-text">{linkify(e.text)}</span>
+                  </div>
+                ))}
+              </div>
+              {log.length > 0 && (
+                <button
+                  className="log-explain-fab"
+                  onClick={explainRun}
+                  title="Optional: let the AI explain what happened in this run"
+                >
+                  <Icon name="sparkles" size={14} /> Explain run
+                </button>
+              )}
             </div>
           )}
         </aside>

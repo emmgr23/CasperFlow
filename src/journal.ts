@@ -15,7 +15,7 @@ export interface JournalEntry {
   to?: string // recipient (name or key)
   hash?: string
   url?: string // explorer link
-  status: 'success' | 'failed' | 'pending'
+  status: 'success' | 'failed' | 'pending' | 'blocked'
   gasMotes?: number // net cost charged, in motes
   gasLimitMotes?: number // gas authorized / held upfront, in motes
   gasConsumedMotes?: number // gas actually consumed, in motes

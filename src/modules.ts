@@ -665,13 +665,9 @@ export const MODULES: ModuleDef[] = [
         type: 'text',
         default: 'read_balance,get_price,send_cspr,attest',
       },
-      {
-        key: 'mode',
-        label: 'Autonomy',
-        type: 'select',
-        options: ['Confirm each action', 'Auto within spend limit'],
-        default: 'Confirm each action',
-      },
+      // Autonomy (sign on its own vs ask first) is decided by the connected
+      // Wallet's mode, the single source of truth, so there's no duplicate
+      // control here. The panel shows a hint pointing to the Wallet.
       { key: 'maxSteps', label: 'Max steps', type: 'number', default: 6 },
     ],
     describe: (p) => trunc(String(p.goal || p.role || 'Autonomous agent')),
