@@ -82,6 +82,9 @@ body {
 
 .app {
   display: flex; flex-direction: column; height: 100vh; --ui-scale: 1.15;
+  /* Floor for the layout: below this the window scrolls horizontally instead of
+     letting the top bar's left and right clusters overlap each other. */
+  min-width: 960px;
   background:
     radial-gradient(1100px 600px at 85% -10%, rgba(139, 92, 246, 0.14), transparent 60%),
     radial-gradient(900px 550px at 5% 110%, rgba(45, 212, 191, 0.10), transparent 60%),
@@ -128,7 +131,7 @@ body {
 }
 /* When the sidebar is collapsed, no vertical divider — the logo joins the top bar. */
 .topbar.collapsed::before { display: none; }
-.topbar-left { display: flex; align-items: center; min-width: 0; }
+.topbar-left { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
 .brand-mark {
   color: #ff5a3c;
   filter: drop-shadow(0 0 8px rgba(255, 90, 60, 0.6));
@@ -141,14 +144,35 @@ body {
   font-family: 'SF Mono', Menlo, monospace; font-size: 12.5px !important;
 }
 .wallet-connected:hover { background: rgba(45, 212, 191, 0.18) !important; }
+/* Name + network label stacked, tucked under the logo. */
+.brand-textcol { position: relative; margin-left: -20px; }
 .brand-name {
   font-family: 'Orbitron', -apple-system, sans-serif;
-  font-size: 25px; font-weight: 700; letter-spacing: 0.5px;
-  margin-left: -20px;
+  font-size: 25px; font-weight: 700; letter-spacing: 0.5px; line-height: 1.05;
   background: linear-gradient(90deg, #F5303C 0%, #E0357A 50%, #7C4DFF 100%);
   -webkit-background-clip: text; background-clip: text; color: transparent;
 }
 .brand-sub { font-size: 12px; color: #64748b; margin-left: 8px; }
+/* Network shown as a small label tucked under the CasperFlow logo (no capsule). */
+.brand-net {
+  position: absolute; top: 100%; left: 0; margin-top: 7px; white-space: nowrap;
+  display: inline-flex; align-items: center; gap: 6px;
+  background: none; border: none; padding: 0; cursor: pointer;
+  font-size: 11px; font-weight: 600; letter-spacing: 0.5px; color: #5eead4;
+  transition: opacity 0.15s;
+}
+.brand-net:hover { opacity: 0.75; }
+/* The dot breathes gently to show the network is live. */
+.brand-net .net-dot {
+  width: 6px; height: 6px; border-radius: 50%; background: #2dd4bf; box-shadow: 0 0 6px #2dd4bf;
+  animation: brandLive 2.6s ease-in-out infinite;
+}
+@keyframes brandLive {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.82); }
+}
+.brand-net.mainnet { color: #fdba74; }
+.brand-net.mainnet .net-dot { background: #fb923c; box-shadow: 0 0 6px #fb923c; }
 
 /* ── Workspace bar ─────────────────────────────────────── */
 .ws-bar { position: relative; margin-left: 0; flex: 1; min-width: 0; }
@@ -251,7 +275,7 @@ body {
 }
 .ws-actions button:hover { background: rgba(255, 255, 255, 0.07); }
 .ws-sep { height: 1px; background: rgba(255, 255, 255, 0.08); margin: 4px 0; }
-.topbar-actions { display: flex; align-items: center; gap: 3px; }
+.topbar-actions { display: flex; align-items: center; gap: 3px; flex-shrink: 0; }
 .badge-testnet {
   font-size: 11px; padding: 4px 10px; border-radius: 999px; margin-right: 4px;
   background: rgba(45, 212, 191, 0.09); color: #5eead4;
@@ -301,8 +325,8 @@ body {
 /* Secondary actions become ghost buttons (no box) */
 .topbar-actions .btn-secondary {
   background: transparent; border: 1px solid transparent; color: #94a3b8;
-  border-radius: 9px; padding: 8px 13px; font-size: 16px; font-weight: 500;
-  backdrop-filter: none; transition: background 0.15s, color 0.15s;
+  border-radius: 9px; padding: 8px 12px; font-size: 14.5px; font-weight: 500;
+  white-space: nowrap; backdrop-filter: none; transition: background 0.15s, color 0.15s;
 }
 .topbar-actions .btn-secondary:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
 .topbar-actions .btn-secondary svg { opacity: 0.85; }
@@ -638,6 +662,12 @@ body {
   white-space: nowrap; vertical-align: baseline;
   user-select: none;
 }
+/* Agent variables are yellow, matching the AGENT badge. */
+.var-token.var-token-agent {
+  background: rgba(250, 204, 21, 0.16);
+  color: #facc15;
+  border-color: rgba(250, 204, 21, 0.4);
+}
 /* Editable field (contenteditable) that renders {{var}} as pills. */
 .var-input {
   width: 100%; font-size: 13.5px; line-height: 1.7;
@@ -745,11 +775,11 @@ body {
 }
 /* Agent badge: the AI Agent yellow (same hue as the node icon). */
 .agent-var-pill {
-  display: inline-flex; align-items: center; line-height: 1;
+  display: inline-flex; align-items: center; align-self: center; line-height: 1;
   margin-left: 2px; font-family: 'SF Mono', Menlo, monospace;
   font-size: calc(10px * var(--ui-scale, 1)); font-weight: 700; letter-spacing: 0.3px;
   color: #facc15; background: rgba(250, 204, 21, 0.16);
-  padding: 2px 6px; border-radius: 6px; flex-shrink: 0;
+  padding: 4px 8px; border-radius: 6px; flex-shrink: 0;
 }
 .ai-output-note {
   font-size: 12px; color: #94a3b8; line-height: 1.5; margin-bottom: 16px;
@@ -1662,10 +1692,28 @@ body {
   color: #c4b5fd; padding: 6px 12px; border-radius: 8px; cursor: pointer;
 }
 .journal-story-btn:hover:not(:disabled) { background: rgba(167, 139, 250, 0.22); }
-.journal-story {
-  font-size: 13.5px; line-height: 1.6; color: #cbd5e1; white-space: pre-wrap;
-  background: rgba(167, 139, 250, 0.07); border: 1px solid rgba(167, 139, 250, 0.18);
-  border-radius: 12px; padding: 14px 16px; margin-bottom: 16px;
+/* Recap pop-up: a centered, dismissible card over the journal. */
+.journal-recap-overlay {
+  position: fixed; inset: 0; z-index: 260;
+  background: rgba(4, 7, 14, 0.66);
+  display: flex; align-items: center; justify-content: center; padding: 24px;
+}
+.journal-recap {
+  width: min(680px, 92vw); max-height: 80vh; display: flex; flex-direction: column;
+  background: linear-gradient(160deg, #141a2e, #0d1320);
+  border: 1px solid rgba(167, 139, 250, 0.32); border-radius: 16px;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.55);
+}
+.journal-recap-head {
+  display: flex; align-items: center; gap: 12px;
+  padding: 16px 18px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+.journal-recap-title { display: inline-flex; align-items: center; gap: 7px; font-weight: 700; color: #e2e8f0; }
+.journal-recap-title svg { color: #c4b5fd; }
+.journal-recap-date { font-size: 12.5px; color: #94a3b8; }
+.journal-recap-body {
+  padding: 18px; overflow-y: auto;
+  font-size: 14px; line-height: 1.65; color: #cbd5e1; white-space: pre-wrap;
 }
 .journal-empty { color: #64748b; font-size: 13.5px; padding: 30px 0; text-align: center; }
 .journal-entries { display: flex; flex-direction: column; gap: 10px; }
@@ -1686,6 +1734,9 @@ body {
 .js-failed { color: #fca5a5; background: rgba(248, 113, 113, 0.16); }
 .js-pending { color: #fcd34d; background: rgba(250, 204, 21, 0.14); }
 .journal-entry-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 12px; color: #94a3b8; }
+.journal-entry-meta strong { color: #cbd5e1; font-weight: 600; }
+.journal-actor { color: #facc15; }
+.journal-usd { color: #64748b; }
 .console-line.ctag-error .console-tag,
 .console-line.ctag-console-error .console-tag { color: #f87171; }
 .console-line.ctag-error .console-msg,

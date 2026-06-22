@@ -16,7 +16,9 @@ function buildHtml(value: string): string {
   let m: RegExpExecArray | null
   while ((m = re.exec(value))) {
     if (m.index > last) html += escapeHtml(value.slice(last, m.index)).replace(/\n/g, '<br>')
-    html += `<span class="var-token" contenteditable="false" data-var="${m[1]}">${m[1]}</span>`
+    // Agent variables ({{agent}}, {{agent1}}…) are always yellow, like the AGENT badge.
+    const agentCls = /^agent\d*$/i.test(m[1]) ? ' var-token-agent' : ''
+    html += `<span class="var-token${agentCls}" contenteditable="false" data-var="${m[1]}">${m[1]}</span>`
     last = m.index + m[0].length
   }
   if (last < value.length) html += escapeHtml(value.slice(last)).replace(/\n/g, '<br>')

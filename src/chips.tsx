@@ -13,8 +13,11 @@ export function renderChips(text: string): ReactNode {
   let i = 0
   while ((m = re.exec(text))) {
     if (m.index > last) out.push(text.slice(last, m.index))
+    // Agent variables ({{agent}}, {{agent1}}, {{agent2}}…) are always yellow,
+    // matching the AGENT badge, so the link to the agent is obvious.
+    const isAgent = /^agent\d*$/i.test(m[1])
     out.push(
-      <span className="var-token" key={i++}>
+      <span className={`var-token${isAgent ? ' var-token-agent' : ''}`} key={i++}>
         {m[1]}
       </span>,
     )

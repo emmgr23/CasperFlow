@@ -10,11 +10,16 @@ export interface JournalEntry {
   kind: 'transfer' | 'attest' | 'x402' | 'stake' | 'deploy' | 'mint' | 'other'
   title: string // human one-line summary
   amount?: number // CSPR moved
+  usd?: number // USD price per CSPR at the time of the action
+  from?: string // source wallet (name or key)
   to?: string // recipient (name or key)
   hash?: string
   url?: string // explorer link
   status: 'success' | 'failed' | 'pending'
-  gasMotes?: number // gas cost in motes (held + refundable on Casper 2.0)
+  gasMotes?: number // net cost charged, in motes
+  gasLimitMotes?: number // gas authorized / held upfront, in motes
+  gasConsumedMotes?: number // gas actually consumed, in motes
+  gasRefundMotes?: number // amount refunded, in motes
   net?: string
 }
 

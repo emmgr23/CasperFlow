@@ -3,6 +3,57 @@ import { getJournal, subscribeJournal, type JournalEntry } from './journal'
 import { askText, type AiConfig } from './ai'
 import Icon from './Icon'
 
+// Show the real cspr.live address, but with the long hash trimmed so it stays
+// on one line: "testnet.cspr.live/deploy/32af5f17…9814d3801".
+function shortUrl(url: string): string {
+  const bare = url.replace(/^https?:\/\//, '')
+  const slash = bare.lastIndexOf('/')
+  if (slash < 0) return bare
+  const head = bare.slice(0, slash + 1)
+  const tail = bare.slice(slash + 1)
+  const id = tail.length > 20 ? `${tail.slice(0, 8)}…${tail.slice(-9)}` : tail
+  return head + id
+}
+
+// Gas in plain CSPR (motes / 1e9). Exact zero shows as "0"; any non-zero value
+// keeps full precision so a tiny refund is never silently rounded to 0.
+const cspr = (motes: number) => {
+  if (motes === 0) return '0'
+  return (motes / 1e9).toFixed(9).replace(/\.?0+$/, '')
+}
+
+// Dollar value of a CSPR amount at the price recorded with the action.
+const usdOf = (amountCspr: number, price?: number): string | null => {
+  if (price == null || !(price > 0)) return null
+  const v = amountCspr * price
+  return v < 0.01 ? `$${v.toFixed(4)}` : `$${v.toFixed(2)}`
+}
+
+// The full, honest gas breakdown from the chain receipt: what was held upfront,
+// what came back, and the net cost. Falls back to the single figure for older
+// entries that only stored the net cost.
+function gasLabel(e: JournalEntry) {
+  const { gasLimitMotes: limit, gasRefundMotes: refund, gasMotes: cost } = e
+  const netMotes = cost != null ? cost : limit != null && refund != null ? limit - refund : null
+  const netUsd = netMotes != null ? usdOf(netMotes / 1e9, e.usd) : null
+  if (limit != null && refund != null) {
+    return (
+      <span className="journal-gas" title="Casper 2.0 holds the gas limit upfront, then releases the unused part back to your wallet">
+        gas: held <strong>{cspr(limit)}</strong>, refunded <strong>{cspr(refund)}</strong>, net{' '}
+        <strong>{netMotes != null ? cspr(netMotes) : '0'}</strong> CSPR
+        {netUsd && <span className="journal-usd"> ({netUsd})</span>}
+      </span>
+    )
+  }
+  if (cost != null)
+    return (
+      <span className="journal-gas">
+        gas {cspr(cost)} CSPR{netUsd && <span className="journal-usd"> ({netUsd})</span>} (refundable)
+      </span>
+    )
+  return null
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const dateKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -180,11 +231,10 @@ export default function JournalView({
               </span>
               {aiConfig && dayEntries.length > 0 && (
                 <button className="journal-story-btn" onClick={tellStory} disabled={storyLoading}>
-                  <Icon name="sparkles" size={13} /> {storyLoading ? 'Writing…' : 'Tell the story'}
+                  <Icon name="sparkles" size={13} /> {storyLoading ? 'Writing…' : "Today's recap"}
                 </button>
               )}
             </div>
-            {story && <div className="journal-story">{story}</div>}
             {dayEntries.length === 0 ? (
               <div className="journal-empty">Nothing happened on this day.</div>
             ) : (
@@ -204,10 +254,26 @@ export default function JournalView({
                         <span className={`journal-status js-${e.status}`}>{e.status}</span>
                       </div>
                       <div className="journal-entry-meta">
-                        {e.amount != null && <span>{e.amount} CSPR</span>}
-                        {e.gasMotes != null && (
-                          <span>gas {(e.gasMotes / 1e9).toFixed(4)} CSPR (refundable)</span>
+                        {e.amount != null && (
+                          <span>
+                            {e.amount} CSPR
+                            {usdOf(e.amount, e.usd) && (
+                              <span className="journal-usd"> ({usdOf(e.amount, e.usd)})</span>
+                            )}
+                          </span>
                         )}
+                        {e.from && (
+                          <span>
+                            from <strong>{e.from}</strong>
+                            {e.to ? (
+                              <>
+                                {' '}to <strong>{e.to}</strong>
+                              </>
+                            ) : null}
+                          </span>
+                        )}
+                        {e.actor && <span className="journal-actor">by {e.actor}</span>}
+                        {gasLabel(e)}
                         {e.url && (
                           <a
                             href={e.url}
@@ -215,7 +281,7 @@ export default function JournalView({
                             rel="noopener noreferrer"
                             className="log-link"
                           >
-                            View transaction
+                            {shortUrl(e.url)}
                           </a>
                         )}
                       </div>
@@ -227,6 +293,29 @@ export default function JournalView({
           </div>
         </div>
       </div>
+
+      {/* The recap is a transient pop-up: read it, then close it, without
+          pushing the actual transaction rows down. */}
+      {story && (
+        <div className="journal-recap-overlay" onClick={() => setStory('')}>
+          <div className="journal-recap" onClick={(e) => e.stopPropagation()}>
+            <div className="journal-recap-head">
+              <span className="journal-recap-title">
+                <Icon name="sparkles" size={15} /> Today's recap
+              </span>
+              <span className="journal-recap-date">{longDate}</span>
+              <button
+                className="journal-close"
+                onClick={() => setStory('')}
+                aria-label="Close"
+              >
+                <Icon name="x" size={16} />
+              </button>
+            </div>
+            <div className="journal-recap-body">{story}</div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

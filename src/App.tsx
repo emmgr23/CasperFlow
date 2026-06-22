@@ -1969,9 +1969,11 @@ function Flow() {
         const net = settingsRef.current.casperNet
         // Poll the node for the real execution result and report Success / Failed —
         // submission alone doesn't mean the transaction succeeded on-chain.
+        let lastGas: { cost?: number; limit?: number; consumed?: number; refund?: number } = {}
         const confirmTx = async (label: string, hash: string): Promise<boolean> => {
           appendLog(`Confirming ${label} on-chain…`, 'info')
           const exec = await awaitExecution(net, hash)
+          lastGas = { cost: exec.cost, limit: exec.limit, consumed: exec.consumed, refund: exec.refund }
           if (exec.status === 'success') {
             appendLog(`✓ ${label} confirmed on-chain: Success.${gasNote(exec.cost)}`, 'ok')
             return true
@@ -2071,10 +2073,16 @@ function Flow() {
                 kind: 'transfer',
                 title: `Sent ${params.amount} CSPR to ${String(params.toName || to.slice(0, 10) + '…')}`,
                 amount: Number(params.amount),
+                usd: getCsprPrice() ?? undefined,
+                from: walletNameForAction || undefined,
                 to: String(params.toName || to),
                 hash: txRes.hash,
                 url: explorerTxUrl(net, txRes.hash || ''),
                 status: txFailed ? 'failed' : 'success',
+                gasMotes: lastGas.cost,
+                gasLimitMotes: lastGas.limit,
+                gasConsumedMotes: lastGas.consumed,
+                gasRefundMotes: lastGas.refund,
                 net,
               })
               addRecentTx(signerHex, {
@@ -2458,6 +2466,13 @@ function Flow() {
             const cloud = settingsRef.current.csprCloudKey || ''
             const toolSpecs = toolsFromParam(params.tools).map((t) => t.spec)
             const role = String(params.role || 'Autonomous on-chain agent')
+            // Tie each journal line to the agent badge on the canvas (Agent 1 / Agent 2)
+            // so a multi-agent run reads as "who did what".
+            const agentActor = (() => {
+              const v = agentVarName(currentNodes, id) // 'agent' | 'agent1' | 'agent2'…
+              const n = v.replace(/^agent/, '')
+              return n ? `${role} (Agent ${n})` : role
+            })()
             const goal =
               substituteVars(String(params.goal || '').trim(), bag) ||
               'Use your tools to inspect the wallet and report its status.'
@@ -2529,15 +2544,20 @@ function Flow() {
                   const ex = await awaitExecution(net, r.hash || '')
                   if (walletKey) refreshWalletBalance(walletKey)
                   recordJournal({
-                    actor: role,
+                    actor: agentActor,
                     kind: 'transfer',
                     title: `Sent ${amt} CSPR to ${String(args.to)}`,
                     amount: amt,
+                    usd: getCsprPrice() ?? undefined,
+                    from: walletNameForAction || undefined,
                     to: String(args.to),
                     hash: r.hash,
                     url,
                     status: ex.status,
                     gasMotes: ex.cost,
+                    gasLimitMotes: ex.limit,
+                    gasConsumedMotes: ex.consumed,
+                    gasRefundMotes: ex.refund,
                     net,
                   })
                   return `Sent ${amt} CSPR. On-chain status: ${ex.status}.${gasNote(ex.cost)} Proof: ${url}`
@@ -2564,14 +2584,21 @@ function Flow() {
                   recordSpend(amt)
                   didAct = true
                   const durl = explorerTxUrl(net, r.hash || '')
+                  const exD = await awaitExecution(net, r.hash || '')
                   recordJournal({
-                    actor: role,
+                    actor: agentActor,
                     kind: 'stake',
                     title: `Delegated ${amt} CSPR to ${validator.slice(0, 10)}…`,
                     amount: amt,
+                    usd: getCsprPrice() ?? undefined,
+                    from: walletNameForAction || undefined,
                     hash: r.hash,
                     url: durl,
-                    status: 'success',
+                    status: exD.status,
+                    gasMotes: exD.cost,
+                    gasLimitMotes: exD.limit,
+                    gasConsumedMotes: exD.consumed,
+                    gasRefundMotes: exD.refund,
                     net,
                   })
                   return `Delegated ${amt} CSPR. Proof: ${durl}`
@@ -2605,14 +2632,21 @@ function Flow() {
                   const url = explorerTxUrl(net, r.hash || '')
                   bag.attesturl = url
                   bag.txurl = url
+                  const exA = await awaitExecution(net, r.hash || '')
                   recordJournal({
-                    actor: role,
+                    actor: agentActor,
                     kind: 'attest',
                     title: `Anchored a proof on Casper: "${note.slice(0, 60)}"`,
                     amount: amt,
+                    usd: getCsprPrice() ?? undefined,
+                    from: walletNameForAction || undefined,
                     hash: r.hash,
                     url,
-                    status: 'success',
+                    status: exA.status,
+                    gasMotes: exA.cost,
+                    gasLimitMotes: exA.limit,
+                    gasConsumedMotes: exA.consumed,
+                    gasRefundMotes: exA.refund,
                     net,
                   })
                   return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… (the 2.5 CSPR anchor went to your own wallet, recoverable, not a fee) Proof: ${url}`
@@ -2918,7 +2952,7 @@ function Flow() {
   return (
     <div className="app" style={{ ['--ui-scale' as string]: settings.scale }}>
       <HelpHints enabled={settings.help !== false} />
-      <button
+      <div
         className="brand"
         onClick={() => {
           // Pan the canvas by the palette width so nodes stay put on screen when
@@ -2930,8 +2964,21 @@ function Flow() {
         title={paletteOpen ? 'Hide the modules sidebar' : 'Show the modules sidebar'}
       >
         <Logo size={39} />
-        <span className="brand-name">CasperFlow</span>
-      </button>
+        <div className="brand-textcol">
+          <span className="brand-name">CasperFlow</span>
+          <button
+            className={`brand-net${settings.casperNet === 'mainnet' ? ' mainnet' : ''}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (settings.casperNet === 'mainnet') setSettings({ ...settings, casperNet: 'testnet' })
+              else setConfirmMainnet(true)
+            }}
+            title="Switch network (Testnet / Mainnet)"
+          >
+            <span className="net-dot" /> {settings.casperNet === 'mainnet' ? 'Mainnet' : 'Testnet'}
+          </button>
+        </div>
+      </div>
       <header
         className={`topbar${paletteOpen ? '' : ' collapsed'}`}
         style={{
@@ -2965,20 +3012,6 @@ function Flow() {
               <span className="live-dot" /> LIVE · {liveInterval}
             </span>
           )}
-          <button
-            className={`net-toggle${settings.casperNet === 'mainnet' ? ' mainnet' : ''}`}
-            onClick={() => {
-              if (settings.casperNet === 'mainnet') {
-                setSettings({ ...settings, casperNet: 'testnet' })
-              } else {
-                setConfirmMainnet(true)
-              }
-            }}
-            title="Click to switch network (Testnet / Mainnet)"
-          >
-            <span className="net-dot" />
-            {settings.casperNet === 'mainnet' ? 'Mainnet' : 'Testnet'}
-          </button>
           <button
             className="btn-secondary btn-icon"
             onClick={() => setShowJournal(true)}

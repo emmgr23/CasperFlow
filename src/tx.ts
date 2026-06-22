@@ -444,19 +444,35 @@ export async function awaitExecution(
   net: CasperNet,
   hash: string,
   opts?: { tries?: number; delayMs?: number },
-): Promise<{ status: 'success' | 'failed' | 'pending'; error?: string; cost?: number }> {
+): Promise<{
+  status: 'success' | 'failed' | 'pending'
+  error?: string
+  cost?: number // net cost charged, in motes
+  limit?: number // gas authorized / held upfront, in motes
+  consumed?: number // gas actually consumed, in motes
+  refund?: number // amount refunded, in motes
+}> {
   const tries = opts?.tries ?? 12
   const delayMs = opts?.delayMs ?? 3500
   const client = rpcOf(net)
   for (let i = 0; i < tries; i++) {
     try {
       const res = (await client.getTransactionByTransactionHash(hash)) as {
-        executionInfo?: { executionResult?: { errorMessage?: string; cost?: number } }
+        executionInfo?: {
+          executionResult?: {
+            errorMessage?: string
+            cost?: number
+            limit?: number
+            consumed?: number
+            refund?: number
+          }
+        }
       }
       const exec = res?.executionInfo?.executionResult
       if (exec) {
-        if (exec.errorMessage) return { status: 'failed', error: exec.errorMessage, cost: exec.cost }
-        return { status: 'success', cost: exec.cost }
+        const gas = { cost: exec.cost, limit: exec.limit, consumed: exec.consumed, refund: exec.refund }
+        if (exec.errorMessage) return { status: 'failed', error: exec.errorMessage, ...gas }
+        return { status: 'success', ...gas }
       }
     } catch {
       // Not indexed yet / transient RPC error — keep polling.
