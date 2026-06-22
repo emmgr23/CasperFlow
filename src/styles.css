@@ -131,7 +131,7 @@ body {
 }
 /* When the sidebar is collapsed, no vertical divider — the logo joins the top bar. */
 .topbar.collapsed::before { display: none; }
-.topbar-left { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; overflow: hidden; }
+.topbar-left { display: flex; align-items: center; flex: 1 1 auto; min-width: 0; }
 .brand-mark {
   color: #ff5a3c;
   filter: drop-shadow(0 0 8px rgba(255, 90, 60, 0.6));

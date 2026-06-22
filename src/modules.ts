@@ -171,6 +171,7 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   setvar: 'live',
   agent: 'beta', // autonomous tool-using agent (new)
   council: 'beta', // multi-agent vote with quorum + escalation (new)
+  oracle: 'beta', // brings external data into the flow (CSPR price live; custom URL best-effort)
   delay: 'live',
   cooldown: 'live',
   spendlimit: 'live', // budget guardrail: blocks real payments above the cap
@@ -206,7 +207,7 @@ export const statusOf = (type: string): ModuleStatus => MODULE_STATUS[type] ?? '
 // pass an explicit small n to stay short.
 const trunc = (s: string, n = 1000) => (s.length > n ? s.slice(0, n - 1) + '…' : s)
 
-import { getCsprPrice } from './price'
+import { getCsprPrice, fetchCsprPrice } from './price'
 import { sendTelegram, sendDiscord, isDiscordWebhook } from './notify'
 import { getAccountBalance, getRecentTransfers, getDexRate, shortKey } from './casper'
 import { askAi, askText } from './ai'
@@ -325,6 +326,60 @@ export const MODULES: ModuleDef[] = [
         pass,
         vars: { price: live },
       }
+    },
+  },
+  {
+    // Brings an external (off-chain) value into the flow as a variable, so later
+    // steps can act on real-world data. The data oracle, distinct from the Agent
+    // Council (which is a decision oracle).
+    type: 'oracle',
+    label: 'Oracle (external data)',
+    category: 'trigger',
+    icon: 'link',
+    params: [
+      {
+        key: 'source',
+        label: 'Data source',
+        type: 'select',
+        options: ['CSPR price (USD)', 'Custom JSON URL'],
+        default: 'CSPR price (USD)',
+      },
+      { key: 'url', label: 'JSON endpoint (for Custom)', type: 'text', default: '' },
+      { key: 'field', label: 'Field path (e.g. main.temp)', type: 'text', default: '' },
+      { key: 'varName', label: 'Save as variable', type: 'text', default: 'oracle' },
+    ],
+    describe: (p) =>
+      String(p.source) === 'Custom JSON URL'
+        ? `Read ${p.field || 'value'} from ${trunc(String(p.url || 'a URL'), 28)}`
+        : 'Read the live CSPR price (USD)',
+    simulate: async (p): Promise<RunResult> => {
+      const vn = String(p.varName || 'oracle').trim() || 'oracle'
+      if (String(p.source) === 'Custom JSON URL') {
+        const url = String(p.url || '').trim()
+        if (!url) return { output: 'Oracle: set a JSON endpoint URL first.', pass: false }
+        try {
+          const r = await fetch(url)
+          if (!r.ok) throw new Error(`HTTP ${r.status}`)
+          const j: unknown = await r.json()
+          const path = String(p.field || '').trim()
+          const picked = path
+            ? path.split('.').reduce<unknown>((o, k) => (o == null ? o : (o as Record<string, unknown>)[k]), j)
+            : j
+          const out = typeof picked === 'object' ? JSON.stringify(picked) : String(picked)
+          return {
+            output: `Oracle: ${path || 'value'} = ${out}`,
+            vars: { [vn]: out, oracle: out },
+          }
+        } catch (e) {
+          return {
+            output: `Oracle: could not read ${url} — ${e instanceof Error ? e.message : 'error'}. Some sites block browser requests; a server proxy may be needed.`,
+            pass: false,
+          }
+        }
+      }
+      const price = (await fetchCsprPrice()) ?? getCsprPrice()
+      if (price == null) return { output: 'Oracle: CSPR price unavailable — check connection.', pass: false }
+      return { output: `Oracle: CSPR price = $${price}`, vars: { [vn]: price, oracle: price } }
     },
   },
   {
