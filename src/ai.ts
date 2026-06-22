@@ -357,3 +357,224 @@ export async function askAi(
   }
   return null
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Autonomous agent loop (tool use).
+// The model is given a goal and a set of tools; it decides which tools to call,
+// we execute them via `executeTool` (App.tsx wires this to the real Casper actions,
+// under guardrails), feed the results back, and repeat until the model produces a
+// final answer or we hit the step cap. This is what turns a single AI node into an
+// autonomous agent. Providers: Claude (native tool use) and OpenAI-compatible
+// (OpenAI, Grok, custom). Gemini tool-use is not wired yet.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export interface AgentToolSpec {
+  name: string
+  description: string
+  parameters: { type: 'object'; properties: Record<string, unknown>; required?: string[] }
+}
+
+export interface AgentEvent {
+  kind: 'thinking' | 'tool_call' | 'tool_result' | 'final' | 'error'
+  text?: string
+  tool?: string
+  args?: Record<string, unknown>
+  result?: string
+}
+
+export interface AgentRunOptions {
+  system: string // the agent's role + guardrail instructions
+  goal: string // the user's plain-English objective
+  tools: AgentToolSpec[]
+  executeTool: (name: string, args: Record<string, unknown>) => Promise<string>
+  maxSteps?: number
+  onEvent?: (e: AgentEvent) => void
+}
+
+export interface AgentResult {
+  finalText: string
+  steps: number
+  stopped: 'done' | 'maxsteps' | 'error'
+}
+
+const isOpenAiCompatible = (p: AiProvider) => p === 'openai' || p === 'grok' || p === 'custom'
+
+function openAiBase(cfg: AiConfig): string {
+  if (cfg.provider === 'openai') return 'https://api.openai.com/v1'
+  if (cfg.provider === 'grok') return 'https://api.x.ai/v1'
+  return (cfg.baseUrl || '').replace(/\/+$/, '')
+}
+
+export async function runAgent(cfg: AiConfig, opts: AgentRunOptions): Promise<AgentResult> {
+  const maxSteps = opts.maxSteps ?? 8
+  const emit = (e: AgentEvent) => opts.onEvent?.(e)
+  if (!cfg.apiKey) {
+    emit({ kind: 'error', text: 'No AI key configured.' })
+    return { finalText: '', steps: 0, stopped: 'error' }
+  }
+  try {
+    if (cfg.provider === 'claude') return await runAgentClaude(cfg, opts, maxSteps, emit)
+    if (isOpenAiCompatible(cfg.provider)) return await runAgentOpenAi(cfg, opts, maxSteps, emit)
+    emit({
+      kind: 'error',
+      text: `Tool-using agents are not wired for ${cfg.provider} yet — use Claude or an OpenAI-compatible provider.`,
+    })
+    return { finalText: '', steps: 0, stopped: 'error' }
+  } catch (e) {
+    emit({ kind: 'error', text: e instanceof Error ? e.message : 'agent loop error (network/CORS)' })
+    return { finalText: '', steps: 0, stopped: 'error' }
+  }
+}
+
+type Block = { type: string; [k: string]: unknown }
+
+// Claude (Anthropic) native tool use.
+async function runAgentClaude(
+  cfg: AiConfig,
+  opts: AgentRunOptions,
+  maxSteps: number,
+  emit: (e: AgentEvent) => void,
+): Promise<AgentResult> {
+  const tools = opts.tools.map((t) => ({
+    name: t.name,
+    description: t.description,
+    input_schema: t.parameters,
+  }))
+  const messages: { role: 'user' | 'assistant'; content: string | Block[] }[] = [
+    { role: 'user', content: opts.goal },
+  ]
+  let steps = 0
+  while (steps < maxSteps) {
+    const r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        'x-api-key': cfg.apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true',
+      },
+      body: JSON.stringify({
+        model: cfg.model,
+        max_tokens: 1500,
+        temperature: 0,
+        system: opts.system,
+        tools,
+        messages,
+      }),
+    })
+    if (!r.ok) {
+      emit({ kind: 'error', text: `Claude HTTP ${r.status}` })
+      return { finalText: '', steps, stopped: 'error' }
+    }
+    const j = await r.json()
+    const content: Block[] = Array.isArray(j?.content) ? j.content : []
+    const textOut = content
+      .filter((b) => b.type === 'text')
+      .map((b) => String(b.text ?? ''))
+      .join(' ')
+      .trim()
+    if (textOut) emit({ kind: 'thinking', text: textOut })
+    const toolUses = content.filter((b) => b.type === 'tool_use')
+    if (toolUses.length === 0) {
+      if (!textOut)
+        emit({
+          kind: 'error',
+          text: `Claude returned no text and no tool call (stop_reason: ${j?.stop_reason ?? 'unknown'}).`,
+        })
+      else emit({ kind: 'final', text: textOut })
+      return { finalText: textOut, steps, stopped: 'done' }
+    }
+    messages.push({ role: 'assistant', content })
+    const results: Block[] = []
+    for (const tu of toolUses) {
+      const name = String(tu.name)
+      const args = (tu.input ?? {}) as Record<string, unknown>
+      emit({ kind: 'tool_call', tool: name, args })
+      const out = await opts.executeTool(name, args)
+      emit({ kind: 'tool_result', tool: name, result: out })
+      results.push({ type: 'tool_result', tool_use_id: tu.id, content: out })
+    }
+    messages.push({ role: 'user', content: results })
+    steps++
+  }
+  emit({ kind: 'final', text: 'Reached the step limit.' })
+  return { finalText: 'Reached the step limit.', steps, stopped: 'maxsteps' }
+}
+
+// OpenAI-compatible function calling (OpenAI, Grok, custom).
+async function runAgentOpenAi(
+  cfg: AiConfig,
+  opts: AgentRunOptions,
+  maxSteps: number,
+  emit: (e: AgentEvent) => void,
+): Promise<AgentResult> {
+  const base = openAiBase(cfg)
+  if (!base) {
+    emit({ kind: 'error', text: 'No base URL for this provider.' })
+    return { finalText: '', steps: 0, stopped: 'error' }
+  }
+  const url = /\/(chat\/)?completions$/.test(base) ? base : `${base}/chat/completions`
+  const tools = opts.tools.map((t) => ({
+    type: 'function',
+    function: { name: t.name, description: t.description, parameters: t.parameters },
+  }))
+  type Msg = { role: string; content: string | null; tool_calls?: unknown; tool_call_id?: string }
+  const messages: Msg[] = [
+    { role: 'system', content: opts.system },
+    { role: 'user', content: opts.goal },
+  ]
+  let steps = 0
+  while (steps < maxSteps) {
+    const r = await fetch(url, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+      body: JSON.stringify({ model: cfg.model, temperature: 0, messages, tools, tool_choice: 'auto' }),
+    })
+    if (!r.ok) {
+      emit({ kind: 'error', text: `${cfg.provider} HTTP ${r.status}` })
+      return { finalText: '', steps, stopped: 'error' }
+    }
+    const j = await r.json()
+    const choice = j?.choices?.[0]
+    const msg = choice?.message
+    if (!msg) {
+      emit({ kind: 'error', text: `No choices in the response. Raw: ${JSON.stringify(j).slice(0, 200)}` })
+      return { finalText: '', steps, stopped: 'error' }
+    }
+    const toolCalls: { id: string; function: { name: string; arguments: string } }[] = Array.isArray(
+      msg.tool_calls,
+    )
+      ? msg.tool_calls
+      : []
+    if (msg.content) emit({ kind: 'thinking', text: String(msg.content) })
+    if (toolCalls.length === 0) {
+      const finalText = String(msg.content ?? '')
+      if (!finalText)
+        emit({
+          kind: 'error',
+          text: `The model returned no text and called no tool (finish_reason: ${
+            choice?.finish_reason ?? 'unknown'
+          }). This provider/model likely does not support tool calling, which the agent needs. Try Claude or OpenAI gpt-4o.`,
+        })
+      else emit({ kind: 'final', text: finalText })
+      return { finalText, steps, stopped: 'done' }
+    }
+    messages.push({ role: 'assistant', content: msg.content ?? null, tool_calls: msg.tool_calls })
+    for (const tc of toolCalls) {
+      const name = tc.function?.name
+      let args: Record<string, unknown> = {}
+      try {
+        args = JSON.parse(tc.function?.arguments || '{}')
+      } catch {
+        args = {}
+      }
+      emit({ kind: 'tool_call', tool: name, args })
+      const out = await opts.executeTool(name, args)
+      emit({ kind: 'tool_result', tool: name, result: out })
+      messages.push({ role: 'tool', content: out, tool_call_id: tc.id })
+    }
+    steps++
+  }
+  emit({ kind: 'final', text: 'Reached the step limit.' })
+  return { finalText: 'Reached the step limit.', steps, stopped: 'maxsteps' }
+}

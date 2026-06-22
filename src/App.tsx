@@ -24,7 +24,8 @@ import WikiPanel from './WikiPanel'
 import WorkspaceBar from './WorkspaceBar'
 import TemplateGallery from './TemplateGallery'
 import { type AgentTemplate, buildFromSpecs, AGENT_TEMPLATES } from './templates'
-import { generateWorkflow, editWorkflow, askText } from './ai'
+import { generateWorkflow, editWorkflow, askText, runAgent } from './ai'
+import { toolsFromParam } from './agentTools'
 import {
   loadStore, saveStore, newId, exportWorkspace, downloadJson, parseImport,
   type Workspace, type WorkspaceStore,
@@ -42,7 +43,7 @@ import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type
 import { buildAttestation } from './attest'
 import { aiVarName } from './aiVars'
 import { fetchCsprPrice, getCsprPrice } from './price'
-import { getAccountBalance, getRecentTransfers, shortKey } from './casper'
+import { getAccountBalance, getRecentTransfers, resolveCsprName, shortKey } from './casper'
 import Icon from './Icon'
 import Logo from './Logo'
 import PulseEdge from './PulseEdge'
@@ -2026,6 +2027,12 @@ function Flow() {
               `Send CSPR (LIVE): "${to.slice(0, 10)}…" is not a valid recipient (public key or resolved CSPR.name) — skipped.`,
               'warn',
             )
+          } else if (signerHex && to.toLowerCase() === signerHex.toLowerCase()) {
+            appendLog(
+              'Send CSPR (LIVE): the recipient is the same wallet that signs. Casper rejects sending to your own purse ("Invalid purse"). Pick a different recipient. Skipped.',
+              'warn',
+            )
+            branchStops = true
           } else if (!enforceSpend(Number(params.amount), 'Send CSPR')) {
             /* blocked by spend limit — skip */
           } else if (
@@ -2396,6 +2403,174 @@ function Flow() {
               branchStops = true
               txFailed = true
             }
+          }
+        } else if (data.moduleType === 'agent') {
+          // ── Autonomous Agent: an LLM tool-use loop wired to the real Casper
+          //    actions, under the same spend-limit + approval guardrails. ──
+          const aiCfg = settingsRef.current.aiKey
+            ? {
+                provider: settingsRef.current.aiProvider,
+                apiKey: settingsRef.current.aiKey,
+                model: settingsRef.current.aiModel,
+                baseUrl: settingsRef.current.aiBaseUrl,
+              }
+            : undefined
+          if (!aiCfg) {
+            appendLog('Autonomous Agent: add an AI key in Settings → AI to run it.', 'warn')
+          } else {
+            const isKey = (s: string) => /^01[0-9a-fA-F]{64}$/.test(s) || /^02[0-9a-fA-F]{66}$/.test(s)
+            const isHash = (s: string) => /^[0-9a-fA-F]{64}$/.test(s)
+            const cloud = settingsRef.current.csprCloudKey || ''
+            const toolSpecs = toolsFromParam(params.tools).map((t) => t.spec)
+            const role = String(params.role || 'Autonomous on-chain agent')
+            const goal =
+              String(params.goal || '').trim() ||
+              'Use your tools to inspect the wallet and report its status.'
+            const system =
+              `You are "${role}", an autonomous agent operating on the Casper ${net} network. ` +
+              'Pursue the goal by calling the available tools: think, call one or more tools, read the ' +
+              'results, and continue until the goal is met, then give a short final summary. ' +
+              'You sign REAL transactions. Never do more than the goal asks. Some tools are guarded by a ' +
+              'spend limit and may be blocked or need approval; if a tool is refused or blocked, stop and ' +
+              'explain rather than retrying. Amounts are in CSPR. Be concise.'
+
+            const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
+              try {
+                if (name === 'get_price') {
+                  const p = (await fetchCsprPrice()) ?? getCsprPrice()
+                  return p != null ? `CSPR price: $${p}` : 'Price unavailable.'
+                }
+                if (name === 'read_balance') {
+                  const acct = String(args.account || signerHex)
+                  const a = isKey(acct) || isHash(acct) ? acct : resolveRecipientWallet(acct)?.publicHex || acct
+                  const info = await getAccountBalance(net, cloud, a)
+                  return info ? `Balance of ${shortKey(a)}: ${info.balance} CSPR` : 'Could not read balance.'
+                }
+                if (name === 'recent_transfers') {
+                  const acct = String(args.account || signerHex)
+                  const a = isKey(acct) || isHash(acct) ? acct : resolveRecipientWallet(acct)?.publicHex || acct
+                  const lim = Math.max(1, Math.min(25, Number(args.limit) || 10))
+                  const ts = await getRecentTransfers(net, cloud, a, lim)
+                  if (!ts || !ts.length) return 'No recent transfers.'
+                  return ts
+                    .slice(0, lim)
+                    .map((t) => `${t.out ? '-' : '+'}${t.amount} CSPR ${t.out ? 'out' : 'in'} @ ${t.timestamp}`)
+                    .join('; ')
+                }
+                if (name === 'resolve_name') {
+                  const h = await resolveCsprName(net, cloud, String(args.name || ''))
+                  return h ? `${args.name} -> ${h}` : `Could not resolve ${args.name}.`
+                }
+                if (name === 'send_cspr') {
+                  let to = String(args.to || '').trim().replace(/^account-hash-/i, '')
+                  if (to && !isKey(to) && !isHash(to)) {
+                    const m = resolveRecipientWallet(to)
+                    if (m?.publicHex) to = m.publicHex
+                  }
+                  const amt = Number(args.amount)
+                  if (!(amt > 0)) return 'Refused: amount must be a positive number of CSPR.'
+                  if (!isKey(to) && !isHash(to)) return `Refused: "${String(args.to)}" is not a valid recipient.`
+                  if (signerHex && to.toLowerCase() === signerHex.toLowerCase())
+                    return 'Refused: cannot send to the same wallet that signs (Casper rejects self-transfers as "Invalid purse"). Choose a different recipient.'
+                  if (!enforceSpend(amt, 'Agent send'))
+                    return `Blocked by spend limit: sending ${amt} CSPR would exceed the cap.`
+                  if (!(await confirmIfNeeded('Agent: Send CSPR', `${amt} CSPR -> ${to.slice(0, 8)}…`)))
+                    return 'Refused by the user.'
+                  const r = await sendCsprReal({ net, senderHex: signerHex, recipientHex: to, amountCspr: amt })
+                  if (!r.ok) {
+                    branchStops = true
+                    return `Transfer failed: ${r.error}`
+                  }
+                  recordSpend(amt)
+                  didAct = true
+                  const url = explorerTxUrl(net, r.hash || '')
+                  appendLog(`Agent sent ${amt} CSPR -> ${to.slice(0, 8)}… · ${url}`, 'info')
+                  const ex = await awaitExecution(net, r.hash || '')
+                  if (walletKey) refreshWalletBalance(walletKey)
+                  return `Sent ${amt} CSPR. On-chain status: ${ex.status}. Proof: ${url}`
+                }
+                if (name === 'delegate') {
+                  const validator = String(args.validator || '').trim()
+                  const amt = Number(args.amount)
+                  if (!isKey(validator)) return 'Refused: validator must be a public key.'
+                  if (!(amt > 0)) return 'Refused: amount must be positive.'
+                  if (!enforceSpend(amt, 'Agent delegate')) return 'Blocked by spend limit.'
+                  if (!(await confirmIfNeeded('Agent: Delegate', `${amt} CSPR · ${validator.slice(0, 8)}…`)))
+                    return 'Refused by the user.'
+                  const r = await delegateReal({
+                    net,
+                    senderHex: signerHex,
+                    validatorHex: validator,
+                    amountCspr: amt,
+                    op: 'Delegate',
+                  })
+                  if (!r.ok) {
+                    branchStops = true
+                    return `Delegate failed: ${r.error}`
+                  }
+                  recordSpend(amt)
+                  didAct = true
+                  return `Delegated ${amt} CSPR. Proof: ${explorerTxUrl(net, r.hash || '')}`
+                }
+                if (name === 'attest') {
+                  const note = String(args.note || '').slice(0, 400)
+                  const att = buildAttestation(`agent:${note}`, signerHex)
+                  const amt = 2.5
+                  const anchorTo =
+                    loadWalletProfiles()
+                      .map((w) => w.publicHex)
+                      .find((h) => h && h.toLowerCase() !== signerHex.toLowerCase()) || ''
+                  if (!anchorTo)
+                    return 'Cannot attest: add a second saved wallet (Casper forbids self-transfers).'
+                  if (!enforceSpend(amt, 'Agent attest')) return 'Blocked by spend limit.'
+                  if (!(await confirmIfNeeded('Agent: Attest', `"${note.slice(0, 24)}…"`)))
+                    return 'Refused by the user.'
+                  const r = await sendCsprReal({
+                    net,
+                    senderHex: signerHex,
+                    recipientHex: anchorTo,
+                    amountCspr: amt,
+                    transferId: BigInt(att.transferId),
+                  })
+                  if (!r.ok) {
+                    branchStops = true
+                    return `Attest failed: ${r.error}`
+                  }
+                  recordSpend(amt)
+                  didAct = true
+                  const url = explorerTxUrl(net, r.hash || '')
+                  bag.attesturl = url
+                  bag.txurl = url
+                  return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… Proof: ${url}`
+                }
+                return `Unknown tool: ${name}`
+              } catch (e) {
+                return `Tool error: ${e instanceof Error ? e.message : 'failed'}`
+              }
+            }
+
+            appendLog(`Autonomous Agent "${role}" starting…`, 'info')
+            const result = await runAgent(aiCfg, {
+              system,
+              goal,
+              tools: toolSpecs,
+              executeTool: exec,
+              maxSteps: Math.max(2, Math.min(12, Number(params.maxSteps) || 6)),
+              onEvent: (ev) => {
+                if (ev.kind === 'thinking' && ev.text) appendLog(`🧠 ${ev.text}`, 'step')
+                else if (ev.kind === 'tool_call') appendLog(`→ ${ev.tool}(${JSON.stringify(ev.args ?? {})})`, 'info')
+                else if (ev.kind === 'tool_result' && ev.result) appendLog(`← ${ev.tool}: ${ev.result}`, 'info')
+                else if (ev.kind === 'final') appendLog(`✓ Agent: ${ev.text || '(no answer returned)'}`, 'ok')
+                else if (ev.kind === 'error' && ev.text) appendLog(`Agent error: ${ev.text}`, 'warn')
+              },
+            })
+            // Expose the agent's final answer so later agents/steps can use it:
+            // {{agent}}, {{agent2}}… (left-to-right order on the canvas).
+            const agentNodes = currentNodes
+              .filter((n) => (n.data as ModuleNodeData).moduleType === 'agent')
+              .sort((a, b) => (a.position?.x ?? 0) - (b.position?.x ?? 0))
+            const aidx = agentNodes.findIndex((n) => n.id === id)
+            bag[aidx <= 0 ? 'agent' : `agent${aidx + 1}`] = result.finalText || '(no output)'
           }
         } else {
           handled = false

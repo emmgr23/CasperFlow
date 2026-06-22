@@ -1,6 +1,7 @@
 export type ModuleCategory =
   | 'trigger'
   | 'logic'
+  | 'agent'
   | 'trading'
   | 'payments'
   | 'contracts'
@@ -62,6 +63,60 @@ export function evalMaybeMath(expr: string): string | number {
   return expr
 }
 
+// Evaluate a single numeric side of a comparison ("balance", "4700", "10*2").
+function evalNumSide(part: string): number | null {
+  const t = part.trim()
+  if (!t) return null
+  if (/^-?[\d\s.+\-*/()]+$/.test(t) && /\d/.test(t)) {
+    try {
+      // eslint-disable-next-line no-new-func
+      const v = Function(`"use strict"; return (${t});`)()
+      if (typeof v === 'number' && isFinite(v)) return v
+    } catch {
+      /* fall through */
+    }
+  }
+  const n = Number(t)
+  return isNaN(n) ? null : n
+}
+
+// REAL condition evaluation. Substitutes variable names (e.g. "balance") with
+// their run values, strips %/$/commas, then compares both sides numerically.
+// Returns ok=false when the rule can't be understood (the gate then stops, the
+// safe default for a money guardrail). This replaced a Math.random() stub.
+export function evalCondition(
+  expr: string,
+  vars: Record<string, string | number>,
+): { ok: boolean; value: boolean } {
+  let s = String(expr ?? '')
+  // {{var}} form first.
+  s = s.replace(/\{\{\s*([\w.]+)\s*\}\}/g, (_, key) => (key in vars ? String(vars[key]) : '0'))
+  // Bare variable names (longest first so "balance2" beats "balance").
+  for (const k of Object.keys(vars).sort((a, b) => b.length - a.length)) {
+    if (!/^[a-zA-Z_]\w*$/.test(k)) continue
+    s = s.replace(new RegExp(`\\b${k}\\b`, 'g'), String(vars[k]))
+  }
+  s = s.replace(/[%$,]/g, '')
+  const m = s.match(/(>=|<=|==|!=|=|>|<)/)
+  if (!m) {
+    const n = Number(s.trim())
+    return isNaN(n) ? { ok: false, value: false } : { ok: true, value: n !== 0 }
+  }
+  const op = m[1]
+  const idx = s.indexOf(op)
+  const lhs = evalNumSide(s.slice(0, idx))
+  const rhs = evalNumSide(s.slice(idx + op.length))
+  if (lhs == null || rhs == null) return { ok: false, value: false }
+  let value = false
+  if (op === '>') value = lhs > rhs
+  else if (op === '<') value = lhs < rhs
+  else if (op === '>=') value = lhs >= rhs
+  else if (op === '<=') value = lhs <= rhs
+  else if (op === '!=') value = lhs !== rhs
+  else value = lhs === rhs // '==' or '='
+  return { ok: true, value }
+}
+
 export interface ModuleDef {
   type: string
   label: string
@@ -76,6 +131,7 @@ export interface ModuleDef {
 export const CATEGORY_LABELS: Record<ModuleCategory, string> = {
   trigger: 'Triggers',
   logic: 'Logic',
+  agent: 'AI Agent',
   trading: 'Trading & DeFi',
   payments: 'Payments',
   contracts: 'Smart contracts',
@@ -83,19 +139,22 @@ export const CATEGORY_LABELS: Record<ModuleCategory, string> = {
   output: 'Outputs',
 }
 
+// Rainbow order, top to bottom (red → orange → yellow → green → teal → blue →
+// indigo → violet), matching the palette display order for a clean, structured look.
 export const CATEGORY_COLORS: Record<ModuleCategory, { bg: string; border: string; text: string }> = {
-  trigger: { bg: 'rgba(139, 92, 246, 0.14)', border: '#a78bfa', text: '#ede9fe' },
-  logic: { bg: 'rgba(148, 163, 184, 0.12)', border: '#94a3b8', text: '#e2e8f0' },
-  trading: { bg: 'rgba(45, 212, 191, 0.12)', border: '#2dd4bf', text: '#ccfbf1' },
-  payments: { bg: 'rgba(52, 211, 153, 0.13)', border: '#34d399', text: '#d1fae5' },
-  contracts: { bg: 'rgba(96, 165, 250, 0.13)', border: '#60a5fa', text: '#dbeafe' },
-  rwa: { bg: 'rgba(251, 191, 36, 0.13)', border: '#fbbf24', text: '#fef3c7' },
-  output: { bg: 'rgba(251, 146, 60, 0.14)', border: '#fb923c', text: '#ffedd5' },
+  trigger: { bg: 'rgba(248, 113, 113, 0.14)', border: '#f87171', text: '#fee2e2' }, // red
+  logic: { bg: 'rgba(251, 146, 60, 0.14)', border: '#fb923c', text: '#ffedd5' }, // orange
+  agent: { bg: 'rgba(250, 204, 21, 0.14)', border: '#facc15', text: '#fef9c3' }, // yellow
+  trading: { bg: 'rgba(74, 222, 128, 0.13)', border: '#4ade80', text: '#dcfce7' }, // green
+  payments: { bg: 'rgba(45, 212, 191, 0.13)', border: '#2dd4bf', text: '#ccfbf1' }, // teal
+  contracts: { bg: 'rgba(96, 165, 250, 0.13)', border: '#60a5fa', text: '#dbeafe' }, // blue
+  rwa: { bg: 'rgba(129, 140, 248, 0.14)', border: '#818cf8', text: '#e0e7ff' }, // indigo
+  output: { bg: 'rgba(192, 132, 252, 0.14)', border: '#c084fc', text: '#f3e8ff' }, // violet
 }
 
 // Categories whose actions can be signed autonomously or require approval.
 export const SIGNABLE = (c: ModuleCategory) =>
-  c === 'trading' || c === 'payments' || c === 'contracts' || c === 'rwa'
+  c === 'trading' || c === 'payments' || c === 'contracts' || c === 'rwa' || c === 'agent'
 
 // Three tiers of reality, shown on every card:
 //  'live' = works for real now (real reads, real signed transactions, real sends)
@@ -109,6 +168,7 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   schedule: 'live',
   condition: 'live',
   setvar: 'live',
+  agent: 'beta', // autonomous tool-using agent (new)
   delay: 'live',
   cooldown: 'live',
   spendlimit: 'live', // budget guardrail: blocks real payments above the cap
@@ -483,13 +543,15 @@ export const MODULES: ModuleDef[] = [
       { key: 'expression', label: 'Rule (if…)', type: 'text', default: 'spread > 1%' },
     ],
     describe: (p) => `If ${p.expression}`,
-    simulate: (p) => {
-      const pass = Math.random() > 0.3
+    simulate: (p, ctx) => {
+      const expr = String(p.expression ?? '').trim()
+      const r = evalCondition(expr, ctx.vars ?? {})
+      if (!r.ok) {
+        return { output: `"${expr}" could not be evaluated → branch stops`, pass: false }
+      }
       return {
-        output: pass
-          ? `"${p.expression}" is true → continue`
-          : `"${p.expression}" is false → branch stops`,
-        pass,
+        output: r.value ? `"${expr}" is true → continue` : `"${expr}" is false → branch stops`,
+        pass: r.value,
       }
     },
   },
@@ -583,6 +645,42 @@ export const MODULES: ModuleDef[] = [
         output: `AI (simulated — add a key in Settings → AI): "${p.instruction}" → yes`,
         pass: true,
         vars: { ai: 'Looks good — proceeding (simulated AI).', aidecision: 'YES' },
+      }
+    },
+  },
+  {
+    type: 'agent',
+    label: 'Autonomous Agent',
+    category: 'agent',
+    icon: 'sparkles',
+    params: [
+      { key: 'role', label: 'Role', type: 'text', default: 'Autonomous treasury operator' },
+      { key: 'goal', label: 'Goal (plain English)', type: 'text', default: '' },
+      {
+        key: 'tools',
+        label: 'Tools (comma-separated)',
+        type: 'text',
+        default: 'read_balance,get_price,send_cspr,attest',
+      },
+      {
+        key: 'mode',
+        label: 'Autonomy',
+        type: 'select',
+        options: ['Confirm each action', 'Auto within spend limit'],
+        default: 'Confirm each action',
+      },
+      { key: 'maxSteps', label: 'Max steps', type: 'number', default: 6 },
+    ],
+    describe: (p) => trunc(String(p.goal || p.role || 'Autonomous agent')),
+    simulate: async (p): Promise<RunResult> => {
+      // The real tool-using loop runs in App.tsx (it needs the signer + guardrails).
+      // This fallback only fires if the agent runtime is unavailable.
+      return {
+        output: `Autonomous Agent "${String(
+          p.role || 'agent',
+        )}" ran in preview. Add an AI key and connect a wallet to let it act for real.`,
+        pass: true,
+        vars: { agent: 'preview' },
       }
     },
   },
