@@ -1955,11 +1955,13 @@ body {
   transition: color 0.12s;
 }
 .rp-tab:hover { color: #cbd5e1; }
-.rp-tab.active { color: #a5f3fc; }
+/* Accent defaults to cyan; the Properties tab overrides --rp-accent inline with
+   the selected module's category colour (yellow for AI Agent, blue for Wallet…). */
+.rp-tab.active { color: var(--rp-accent-text, #a5f3fc); }
 .rp-tab.active::after {
   content: ''; position: absolute; left: 0; right: 0; bottom: -1px; height: 2px;
-  background: #22d3ee; border-radius: 2px;
-  box-shadow: 0 0 8px rgba(34, 211, 238, 0.7);
+  background: var(--rp-accent, #22d3ee); border-radius: 2px;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--rp-accent, #22d3ee) 70%, transparent);
 }
 /* Contextual actions (Explain / Clear) — small ghost icon buttons, lower weight */
 .rp-actions { display: inline-flex; align-items: center; gap: 1px; flex-shrink: 0; }

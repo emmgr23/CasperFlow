@@ -130,9 +130,11 @@ export default function PulseEdge(props: EdgeProps) {
         style={{ stroke: strokeRef, color: toC, strokeWidth: active ? 3 : 2 }}
       />
       {active && bolt && (
+        // The glow follows the SAME gradient as the wire (orange→yellow, blue→red…);
+        // the core stays white, like the bright centre of real lightning.
         <g className="cf-spark" style={{ color: toC }}>
-          {bolt2 && <path className="cf-bolt-glow" d={bolt2} />}
-          <path className="cf-bolt-glow" d={bolt} />
+          {bolt2 && <path className="cf-bolt-glow" d={bolt2} stroke={strokeRef} />}
+          <path className="cf-bolt-glow" d={bolt} stroke={strokeRef} />
           {bolt2 && <path className="cf-bolt-core" d={bolt2} />}
           <path className="cf-bolt-core" d={bolt} />
         </g>

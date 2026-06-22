@@ -508,6 +508,8 @@ function Flow() {
       text: 'Right-click modules and links for options. Double-click a module to configure it.',
     },
   ])
+  // History of cleared logs, so an accidental "Clear" can be undone.
+  const [clearedLogs, setClearedLogs] = useState<LogEntry[][]>([])
   const logRef = useRef<HTMLDivElement>(null)
   useEffect(() => {
     logRef.current?.scrollTo({ top: logRef.current.scrollHeight, behavior: 'smooth' })
@@ -1883,7 +1885,7 @@ function Flow() {
       // 1) Use the Wallet node connected UPSTREAM to this signable action.
       if (
         settingsRef.current.liveExecution &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft', 'agent'].includes(data.moduleType)
       ) {
         const wnode = findUpstreamWallet(id, currentNodes, currentEdges)
         if (wnode) {
@@ -1891,7 +1893,12 @@ function Flow() {
           const wname = String(wp.walletName || 'wallet')
           walletNameForAction = wname
           // Approval comes from the connected Wallet's mode (or the go-live toggle).
-          needsApproval = !autoSignRef.current || String(wp.mode) === 'manual'
+          // An Autonomous Agent on an Autonomous wallet signs with no prompt at all
+          // (even on Run once) — that is the whole point of an autonomous agent.
+          needsApproval =
+            data.moduleType === 'agent'
+              ? String(wp.mode) === 'manual'
+              : !autoSignRef.current || String(wp.mode) === 'manual'
           const wsecret = String(wp.walletSecret || '')
           if (!wsecret) {
             setActiveSigner(null)
@@ -2436,6 +2443,12 @@ function Flow() {
 
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
               try {
+                // An Autonomous Agent must sign LOCALLY (no popup). If there is no
+                // local signer, refuse rather than fall back to the Casper Wallet
+                // extension (wrong account + unreliable). Reads are still fine.
+                if (!autonomous && (name === 'send_cspr' || name === 'delegate' || name === 'attest')) {
+                  return 'Cannot sign: this Autonomous Agent has no local signer, so it will not open the Casper Wallet extension. Connect a Wallet node set to Autonomous mode to this agent (or set an agent key in Settings), then run again.'
+                }
                 if (name === 'get_price') {
                   const p = (await fetchCsprPrice()) ?? getCsprPrice()
                   return p != null ? `CSPR price: $${p}` : 'Price unavailable.'
@@ -2979,7 +2992,7 @@ function Flow() {
                     className="palette-chevron"
                     style={{ transform: open ? 'rotate(90deg)' : 'rotate(0deg)' }}
                   />
-                  <span className="palette-dot" style={{ background: cat === 'logic' ? '#22d3ee' : CATEGORY_COLORS[cat].border }} />
+                  <span className="palette-dot" style={{ background: CATEGORY_COLORS[cat].border }} />
                   {CATEGORY_LABELS[cat]}
                   <span className="palette-count">{items.length}</span>
                 </button>
@@ -3306,21 +3319,25 @@ function Flow() {
           <div className="logpanel-resizer" onMouseDown={startLogResize} />
           <div className="rightpanel-tabs">
             <div className="rp-tabgroup">
-              <button
-                className={`rp-tab${rightTab === 'props' ? ' active' : ''}`}
-                onClick={() => setRightTab('props')}
-              >
-                <Icon name="gear" size={14} />{' '}
-                {(() => {
-                  const sn = nodes.find((n) => n.id === selectedNodeId)
-                  const lbl = sn
-                    ? (moduleByType((sn.data as ModuleNodeData).moduleType)?.label || '')
-                        .replace(/\s*\([^)]*\)/g, '')
-                        .trim()
-                    : ''
-                  return lbl ? `${lbl} Properties` : 'Properties'
-                })()}
-              </button>
+              {(() => {
+                const sn = nodes.find((n) => n.id === selectedNodeId)
+                const sdef = sn ? moduleByType((sn.data as ModuleNodeData).moduleType) : undefined
+                const lbl = sdef ? sdef.label.replace(/\s*\([^)]*\)/g, '').trim() : ''
+                const color = sdef ? CATEGORY_COLORS[sdef.category]?.border : undefined
+                return (
+                  <button
+                    className={`rp-tab${rightTab === 'props' ? ' active' : ''}`}
+                    onClick={() => setRightTab('props')}
+                    style={
+                      color
+                        ? ({ '--rp-accent': color, '--rp-accent-text': color } as React.CSSProperties)
+                        : undefined
+                    }
+                  >
+                    <Icon name="gear" size={14} /> {lbl ? `${lbl} Properties` : 'Properties'}
+                  </button>
+                )
+              })()}
               <button
                 className={`rp-tab${rightTab === 'log' ? ' active' : ''}`}
                 onClick={() => setRightTab('log')}
@@ -3334,9 +3351,27 @@ function Flow() {
                   <button className="rp-action" onClick={explainRun} title="AI explains this run">
                     <Icon name="sparkles" size={15} />
                   </button>
+                  {clearedLogs.length > 0 && (
+                    <button
+                      className="rp-action"
+                      onClick={() => {
+                        // Bring back the most recently cleared log.
+                        setClearedLogs((h) => {
+                          const [last, ...rest] = h
+                          if (last) setLog(last)
+                          return rest
+                        })
+                      }}
+                      title={`Restore the last cleared log (${clearedLogs.length} in history)`}
+                    >
+                      <Icon name="rotate" size={15} />
+                    </button>
+                  )}
                   <button
                     className="rp-action"
                     onClick={() => {
+                      // Keep a snapshot so an accidental clear can be undone.
+                      setClearedLogs((h) => (log.length ? [log, ...h].slice(0, 10) : h))
                       setLog([])
                       // Also reset every node back to its idle state (clears the
                       // green "done" / red "error" rings + the check / cross icons).
