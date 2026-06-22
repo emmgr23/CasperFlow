@@ -83,6 +83,16 @@ function tagBornNodes(nodes: Node[]): Node[] {
   return nodes.map((n) => ({ ...n, data: { ...n.data, _born: bornAt, _seq: seq.get(n.id) ?? 0 } }))
 }
 
+// Format the real gas cost (motes → CSPR) with Casper 2.0's refundable note.
+// On Casper 2.0 the fee is HELD for a hold period then released (99% of unspent
+// gas is refunded), so the network is effectively net zero-fee.
+function gasNote(cost?: number): string {
+  if (cost == null || !(cost > 0)) return ''
+  const cspr = cost / 1e9
+  const s = cspr >= 1 ? cspr.toFixed(2) : cspr.toFixed(4)
+  return ` Gas ${s} CSPR (held, refundable on Casper 2.0).`
+}
+
 function pickWalletFromText(text: string): WalletProfile | null {
   const profiles = loadWalletProfiles()
   if (!profiles.length) return null
@@ -1959,7 +1969,7 @@ function Flow() {
           appendLog(`Confirming ${label} on-chain…`, 'info')
           const exec = await awaitExecution(net, hash)
           if (exec.status === 'success') {
-            appendLog(`✓ ${label} CONFIRMED on-chain — Success.`, 'ok')
+            appendLog(`✓ ${label} confirmed on-chain: Success.${gasNote(exec.cost)}`, 'ok')
             return true
           }
           if (exec.status === 'failed') {
@@ -2167,6 +2177,10 @@ function Flow() {
               appendLog(`Claim hash: ${att.claimHash}`, 'info')
               appendLog(`EIP-712 digest: ${att.digest}`, 'info')
               hashes.forEach((h, i) => appendLog(`  part ${i + 1}/${hashes.length}: ${h}`, 'info'))
+              appendLog(
+                `Note: the ${amt} CSPR anchor${hashes.length > 1 ? ` ×${hashes.length}` : ''} went to your own wallet (recoverable, not a fee). The only real cost is gas, held and refundable on Casper 2.0.`,
+                'info',
+              )
               bag.claimhash = att.claimHash
               bag.digest = att.digest
               bag.attesturl = url
@@ -2500,7 +2514,7 @@ function Flow() {
                   appendLog(`Agent sent ${amt} CSPR -> ${to.slice(0, 8)}… · ${url}`, 'info')
                   const ex = await awaitExecution(net, r.hash || '')
                   if (walletKey) refreshWalletBalance(walletKey)
-                  return `Sent ${amt} CSPR. On-chain status: ${ex.status}. Proof: ${url}`
+                  return `Sent ${amt} CSPR. On-chain status: ${ex.status}.${gasNote(ex.cost)} Proof: ${url}`
                 }
                 if (name === 'delegate') {
                   const validator = String(args.validator || '').trim()
@@ -2554,7 +2568,7 @@ function Flow() {
                   const url = explorerTxUrl(net, r.hash || '')
                   bag.attesturl = url
                   bag.txurl = url
-                  return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… Proof: ${url}`
+                  return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… (the 2.5 CSPR anchor went to your own wallet, recoverable, not a fee) Proof: ${url}`
                 }
                 return `Unknown tool: ${name}`
               } catch (e) {
