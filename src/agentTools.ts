@@ -72,6 +72,24 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     },
   },
   {
+    id: 'decide',
+    label: 'Decide / gate',
+    signs: false,
+    spec: {
+      name: 'decide',
+      description:
+        'Make a single yes/no decision about whether the flow should proceed. Call this once, at the end, with your verdict and a one-sentence reason. A "no" can stop the flow here (a guardrail the user configured).',
+      parameters: {
+        type: 'object',
+        properties: {
+          verdict: { type: 'string', enum: ['yes', 'no'], description: 'yes to proceed, no to stop' },
+          reason: { type: 'string', description: 'One short sentence explaining the verdict.' },
+        },
+        required: ['verdict'],
+      },
+    },
+  },
+  {
     id: 'notify',
     label: 'Message me',
     signs: false,
@@ -162,6 +180,8 @@ export function inferToolsFromGoal(goal: string): string[] {
   if (/\b(history|recent|past|previous|last\s+\d+|activity)\b/.test(g)) picked.add('recent_transfers')
   if (/\b(notify|alert|message|ping|tell\s+me|let\s+me\s+know|warn\s+me|dm|telegram|discord|report\s+to)\b/.test(g))
     picked.add('notify')
+  if (/\b(decide|should\s+(we|i|it)|only\s+if|approve|reject|gate|evaluate\s+whether|check\s+if|verify\s+(that|if|whether)|is\s+it\s+safe|allowed\s+to)\b/.test(g))
+    picked.add('decide')
   // Keep the canonical order from AGENT_TOOLS.
   return AGENT_TOOLS.filter((t) => picked.has(t.id)).map((t) => t.id)
 }

@@ -2504,6 +2504,9 @@ function Flow() {
             // spam the user's Telegram/Discord with the same notification.
             const sentMessages = new Set<string>()
             let notifyCount = 0
+            // The agent's yes/no verdict (when it uses the Decide capability). A
+            // "no" can stop the branch if the visible stopOnNo setting allows it.
+            let agentVerdict: 'yes' | 'no' | null = null
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
               // Some models pass `null` (not `{}`) when a tool takes no required
               // args; guard so reading args.* never throws.
@@ -2544,6 +2547,15 @@ function Flow() {
                 if (name === 'resolve_name') {
                   const h = await resolveCsprName(net, cloud, String(args.name || ''))
                   return h ? `${args.name} -> ${h}` : `Could not resolve ${args.name}.`
+                }
+                if (name === 'decide') {
+                  const v = String(args.verdict || '').trim().toLowerCase().startsWith('n') ? 'no' : 'yes'
+                  const reason = String(args.reason || '').trim().slice(0, 200)
+                  agentVerdict = v
+                  bag.agentdecision = v
+                  bag[`${agentVarName(currentNodes, id)}decision`] = v
+                  appendLog(`🧭 Decision: ${v.toUpperCase()}${reason ? ` — ${reason}` : ''}`, v === 'yes' ? 'ok' : 'warn')
+                  return `Decision recorded: ${v}.${v === 'no' ? ' The flow may stop here; do not take further action.' : ' Proceed.'}`
                 }
                 if (name === 'notify') {
                   const msg = String(args.message || '').trim()
@@ -2837,6 +2849,12 @@ function Flow() {
                 net,
               })
               txFailed = true
+              branchStops = true
+            }
+            // Visible flow-control: if the agent decided "no" and the user left the
+            // gate on, the branch stops here (this is the old AI-decision behavior).
+            if (agentVerdict === 'no' && String(params.stopOnNo ?? 'Yes') !== 'No') {
+              appendLog('🧭 Agent decided NO — stopping the flow here.', 'warn')
               branchStops = true
             }
           }
@@ -3297,7 +3315,7 @@ function Flow() {
           {(Object.keys(CATEGORY_LABELS) as ModuleCategory[]).map((cat) => {
             const q = search.trim().toLowerCase()
             const items = MODULES.filter(
-              (m) => m.category === cat && m.label.toLowerCase().includes(q),
+              (m) => m.category === cat && !m.hidden && m.label.toLowerCase().includes(q),
             )
             if (items.length === 0) return null
             const open = q.length > 0 || !collapsedCats.includes(cat)

@@ -125,6 +125,7 @@ export interface ModuleDef {
   params: ParamDef[]
   describe: (p: Params) => string
   simulate: (p: Params, ctx: RunContext) => RunResult | Promise<RunResult>
+  hidden?: boolean // kept working for existing flows, but not shown in the palette
 }
 
 // Order here = display order in the palette.
@@ -564,6 +565,9 @@ export const MODULES: ModuleDef[] = [
     label: 'AI decision',
     category: 'logic',
     icon: 'sparkles',
+    // Folded into the AI Agent (the "Decide / gate" capability). Kept functional
+    // so existing flows that use it still run, but no longer offered in the palette.
+    hidden: true,
     params: [
       {
         key: 'instruction',
@@ -654,7 +658,7 @@ export const MODULES: ModuleDef[] = [
   },
   {
     type: 'agent',
-    label: 'Autonomous Agent',
+    label: 'AI Agent',
     category: 'agent',
     icon: 'sparkles',
     params: [
@@ -672,6 +676,14 @@ export const MODULES: ModuleDef[] = [
       // Autonomy (sign on its own vs ask first) is decided by the connected
       // Wallet's mode, the single source of truth, so there's no duplicate
       // control here. The panel shows a hint pointing to the Wallet.
+      // Visible flow-control: when the agent can decide, a "no" can stop the branch.
+      {
+        key: 'stopOnNo',
+        label: 'Stop the flow if the agent decides no',
+        type: 'select',
+        options: ['Yes', 'No'],
+        default: 'Yes',
+      },
       { key: 'maxSteps', label: 'Max steps', type: 'number', default: 6 },
     ],
     describe: (p) => trunc(String(p.goal || p.role || 'Autonomous agent')),
@@ -679,7 +691,7 @@ export const MODULES: ModuleDef[] = [
       // The real tool-using loop runs in App.tsx (it needs the signer + guardrails).
       // This fallback only fires if the agent runtime is unavailable.
       return {
-        output: `Autonomous Agent "${String(
+        output: `AI Agent "${String(
           p.role || 'agent',
         )}" ran in preview. Add an AI key and connect a wallet to let it act for real.`,
         pass: true,
