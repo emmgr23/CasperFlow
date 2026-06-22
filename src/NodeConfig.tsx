@@ -323,7 +323,7 @@ export default function NodeConfig({ id, data }: { id: string; data: ModuleNodeD
               </button>
             </div>
           </div>
-        ) : /(message|instruction|data|args|prompt|question|goal)/i.test(p.key) ? (
+        ) : /(message|instruction|data|args|prompt|question|goal|proposal)/i.test(p.key) ? (
           <>
             <VariableInput
               multiline

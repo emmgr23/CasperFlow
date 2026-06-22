@@ -44,6 +44,7 @@ import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type
 import { buildAttestation } from './attest'
 import { aiVarName, agentVarName } from './aiVars'
 import { linkify } from './linkify'
+import { sendTelegram, sendDiscord, isDiscordWebhook } from './notify'
 import { recordJournal } from './journal'
 import { fetchCsprPrice, getCsprPrice } from './price'
 import { getAccountBalance, getRecentTransfers, resolveCsprName, shortKey } from './casper'
@@ -2488,6 +2489,10 @@ function Flow() {
               'If a tool call is refused, blocked, or fails, STOP immediately. Do NOT work around it: ' +
               'do not change the recipient, amount, or validator, do not pick a different account, and do ' +
               'not retry. Report exactly what was refused and end. ' +
+              'NEVER invent or guess URLs, transaction hashes, account addresses, or proof links: include ' +
+              'ONLY values that a tool actually returned to you in this run, copied exactly. If you do not ' +
+              'have a real link, do not include one. ' +
+              'When messaging the user, send a single summary message; never send the same notification twice. ' +
               'Amounts are in CSPR. Be concise.'
 
             // HARD guardrail: once a signing action is blocked (self-transfer or
@@ -2495,6 +2500,10 @@ function Flow() {
             // instruction is not enough — models will try to work around a refusal
             // by changing the recipient. This makes that impossible.
             let signingLocked = false
+            // HARD guardrail for messaging: dedupe + cap, so a looping model can't
+            // spam the user's Telegram/Discord with the same notification.
+            const sentMessages = new Set<string>()
+            let notifyCount = 0
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
               // Some models pass `null` (not `{}`) when a tool takes no required
               // args; guard so reading args.* never throws.
@@ -2535,6 +2544,34 @@ function Flow() {
                 if (name === 'resolve_name') {
                   const h = await resolveCsprName(net, cloud, String(args.name || ''))
                   return h ? `${args.name} -> ${h}` : `Could not resolve ${args.name}.`
+                }
+                if (name === 'notify') {
+                  const msg = String(args.message || '').trim()
+                  if (!msg) return 'Refused: empty message.'
+                  // Reject placeholders like <attest_link> or [block_hash]: the model
+                  // must paste the real value a tool returned, not a stand-in.
+                  if (/<[a-z0-9_ ]+>|\[[a-z0-9_ ]+\]/i.test(msg))
+                    return 'Refused: your message contains a placeholder (e.g. <attest_link>) instead of a real value. Copy the exact link a tool returned, then send.'
+                  if (sentMessages.has(msg))
+                    return 'Already sent this exact message this run. Do NOT notify again; stop.'
+                  if (notifyCount >= 3)
+                    return 'Notification limit reached for this run (3). Do NOT notify again; stop.'
+                  // Count the attempt (even if it fails or no channel) so the agent
+                  // cannot loop on notify.
+                  sentMessages.add(msg)
+                  notifyCount++
+                  const tgToken = settingsRef.current.telegramToken || ''
+                  const tgChat = settingsRef.current.telegramChatId || ''
+                  const dh = settingsRef.current.discordWebhook || ''
+                  if (tgToken && tgChat) {
+                    const ok = await sendTelegram(tgToken, tgChat, msg)
+                    return ok ? 'Message sent on Telegram.' : 'Telegram send failed (check the token/chat in Settings).'
+                  }
+                  if (dh && isDiscordWebhook(dh)) {
+                    const ok = await sendDiscord(dh, msg)
+                    return ok ? 'Message sent on Discord.' : 'Discord send failed (check the webhook in Settings).'
+                  }
+                  return 'No messaging channel is configured. Add a Telegram bot or a Discord webhook in Settings → Integrations to enable this.'
                 }
                 if (name === 'send_cspr') {
                   let to = String(args.to || '').trim().replace(/^account-hash-/i, '')
@@ -2802,6 +2839,86 @@ function Flow() {
               txFailed = true
               branchStops = true
             }
+          }
+        } else if (data.moduleType === 'council') {
+          // ── Agent Council: several AI members vote on a proposal; a quorum
+          //    rule decides, with ESCALATE as a human-in-the-loop safety valve. ──
+          const aiCfg = settingsRef.current.aiKey
+            ? {
+                provider: settingsRef.current.aiProvider,
+                apiKey: settingsRef.current.aiKey,
+                model: settingsRef.current.aiModel,
+                baseUrl: settingsRef.current.aiBaseUrl,
+              }
+            : undefined
+          if (!aiCfg) {
+            appendLog('Agent Council: add an AI key in Settings → AI to run the vote.', 'warn')
+            txFailed = true
+            branchStops = true
+          } else {
+            const proposal =
+              substituteVars(String(params.proposal || '').trim(), bag) || '(no proposal given)'
+            const members = String(params.members || '')
+              .split(',')
+              .map((s) => s.trim())
+              .filter(Boolean)
+            if (!members.length) members.push('Council member')
+            const quorum = Math.max(1, Math.min(members.length, Number(params.quorum) || Math.ceil(members.length / 2)))
+            appendLog(
+              `🏛 Agent Council deliberating: "${proposal.slice(0, 80)}" — ${members.length} members, quorum ${quorum}.`,
+              'info',
+            )
+            // Each member votes independently and in parallel.
+            const votes = await Promise.all(
+              members.map(async (role) => {
+                const sys =
+                  `You are "${role}" on an on-chain treasury council reviewing a proposal. ` +
+                  'Vote exactly one of: APPROVE, REJECT, ABSTAIN, ESCALATE. ' +
+                  'Use ESCALATE only when a human must decide (unusual, risky, or outside policy). ' +
+                  'Reply on ONE line as: VOTE: <APPROVE|REJECT|ABSTAIN|ESCALATE> | <one short sentence why>.'
+                const ans = ((await askText(aiCfg, sys, `Proposal: ${proposal}`)) || '').trim()
+                const m = ans.match(/\b(APPROVE|REJECT|ABSTAIN|ESCALATE)\b/i)
+                const vote = (m ? m[1].toUpperCase() : 'ABSTAIN') as
+                  | 'APPROVE'
+                  | 'REJECT'
+                  | 'ABSTAIN'
+                  | 'ESCALATE'
+                const reason = (ans.includes('|') ? ans.slice(ans.indexOf('|') + 1) : ans).trim().slice(0, 160)
+                return { role, vote, reason }
+              }),
+            )
+            const mark = (v: string) =>
+              v === 'APPROVE' ? '✅' : v === 'REJECT' ? '❌' : v === 'ESCALATE' ? '⚠️' : '➖'
+            votes.forEach((v) => appendLog(`🏛 ${v.role}: ${mark(v.vote)} ${v.vote} — ${v.reason}`, 'info'))
+            const approve = votes.filter((v) => v.vote === 'APPROVE').length
+            const reject = votes.filter((v) => v.vote === 'REJECT').length
+            const escalate = votes.filter((v) => v.vote === 'ESCALATE').length
+            const abstain = votes.length - approve - reject - escalate
+            const outcome: 'APPROVED' | 'REJECTED' | 'ESCALATED' =
+              escalate > 0 ? 'ESCALATED' : approve >= quorum ? 'APPROVED' : 'REJECTED'
+            const tally = `${approve} approve, ${reject} reject, ${escalate} escalate, ${abstain} abstain`
+            appendLog(
+              `🏛 Council decision: ${outcome} (${tally}; quorum ${quorum}).`,
+              outcome === 'APPROVED' ? 'ok' : 'warn',
+            )
+            bag.council = outcome
+            bag.counciltally = tally
+            recordJournal({
+              actor: 'Agent Council',
+              kind: 'other',
+              title: `Council ${outcome}: "${proposal.slice(0, 60)}" (${tally})`,
+              status: outcome === 'APPROVED' ? 'success' : outcome === 'ESCALATED' ? 'blocked' : 'failed',
+              net,
+            })
+            if (String(params.anchor) === 'Yes') {
+              appendLog(
+                '🏛 On-chain anchoring of the decision is the next step; the vote is recorded locally for now.',
+                'info',
+              )
+            }
+            // An escalation needs a human, so it stops the branch. An approve or a
+            // clear reject is a finished decision the next step can act on via {{council}}.
+            if (outcome === 'ESCALATED') branchStops = true
           }
         } else {
           handled = false

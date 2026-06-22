@@ -281,6 +281,29 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
     build: () => ({ nodes: [], edges: [] }),
   },
   {
+    id: 'treasury-agent',
+    name: 'Autonomous treasury agent',
+    icon: 'sparkles',
+    tagline: 'Describe a goal, it acts on Casper',
+    description:
+      'A ready-to-use autonomous agent, already wired to a wallet and a spend limit. Just connect your wallet and write what you want it to do in plain English — it picks the tools it needs by itself. Safe defaults: it asks for your approval before signing, and never spends above the cap.',
+    build: () =>
+      buildChain([
+        { type: 'wallet', params: { mode: 'manual' } },
+        { type: 'spendlimit', params: { max: 10, window: 'This run' } },
+        {
+          type: 'agent',
+          params: {
+            role: 'Autonomous treasury operator',
+            goal:
+              "Check the connected wallet's balance and the current CSPR price, then summarize what you see in one sentence.",
+            toolsMode: 'auto',
+            maxSteps: 8,
+          },
+        },
+      ]),
+  },
+  {
     id: 'sentinel',
     name: 'CSPR Sentinel',
     icon: 'trending',

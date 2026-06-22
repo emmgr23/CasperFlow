@@ -72,6 +72,21 @@ export const AGENT_TOOLS: AgentToolDef[] = [
     },
   },
   {
+    id: 'notify',
+    label: 'Message me',
+    signs: false,
+    spec: {
+      name: 'notify',
+      description:
+        'Send a short message to the user on their configured channel (Telegram or Discord). Use it to report what you did, including any proof link.',
+      parameters: {
+        type: 'object',
+        properties: { message: { type: 'string', description: 'The message to send.' } },
+        required: ['message'],
+      },
+    },
+  },
+  {
     id: 'send_cspr',
     label: 'Send CSPR',
     signs: true,
@@ -145,6 +160,8 @@ export function inferToolsFromGoal(goal: string): string[] {
     picked.add('attest')
   if (/(\.cspr|cspr\.name|resolve)\b/.test(g)) picked.add('resolve_name')
   if (/\b(history|recent|past|previous|last\s+\d+|activity)\b/.test(g)) picked.add('recent_transfers')
+  if (/\b(notify|alert|message|ping|tell\s+me|let\s+me\s+know|warn\s+me|dm|telegram|discord|report\s+to)\b/.test(g))
+    picked.add('notify')
   // Keep the canonical order from AGENT_TOOLS.
   return AGENT_TOOLS.filter((t) => picked.has(t.id)).map((t) => t.id)
 }

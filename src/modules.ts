@@ -169,6 +169,7 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   condition: 'live',
   setvar: 'live',
   agent: 'beta', // autonomous tool-using agent (new)
+  council: 'beta', // multi-agent vote with quorum + escalation (new)
   delay: 'live',
   cooldown: 'live',
   spendlimit: 'live', // budget guardrail: blocks real payments above the cap
@@ -683,6 +684,51 @@ export const MODULES: ModuleDef[] = [
         )}" ran in preview. Add an AI key and connect a wallet to let it act for real.`,
         pass: true,
         vars: { agent: 'preview' },
+      }
+    },
+  },
+  {
+    type: 'council',
+    label: 'Agent Council',
+    category: 'agent',
+    icon: 'shield-check',
+    params: [
+      {
+        key: 'proposal',
+        label: 'Proposal to decide (plain English)',
+        type: 'text',
+        default: '',
+      },
+      {
+        key: 'members',
+        label: 'Council members (roles, comma-separated)',
+        type: 'text',
+        default: 'Risk officer, Compliance officer, Treasury operator',
+      },
+      { key: 'quorum', label: 'Approvals needed (quorum)', type: 'number', default: 2 },
+      {
+        key: 'anchor',
+        label: 'Anchor the decision on Casper',
+        type: 'select',
+        options: ['No', 'Yes'],
+        default: 'No',
+      },
+    ],
+    describe: (p) =>
+      trunc(
+        String(p.proposal || 'A multi-agent vote') +
+          ` · ${String(p.members || '')
+            .split(',')
+            .map((s) => s.trim())
+            .filter(Boolean).length} members, quorum ${p.quorum || 2}`,
+      ),
+    simulate: async (p): Promise<RunResult> => {
+      // The real multi-agent vote runs in App.tsx (needs the AI key + signer for
+      // optional anchoring). This fallback only fires if the runtime is missing.
+      return {
+        output: `Agent Council "${String(p.proposal || 'proposal').slice(0, 40)}" ran in preview. Add an AI key to let the members vote for real.`,
+        pass: true,
+        vars: { council: 'preview' },
       }
     },
   },
