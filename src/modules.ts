@@ -275,7 +275,7 @@ export const MODULES: ModuleDef[] = [
         key: 'unit',
         label: 'Unit',
         type: 'select',
-        options: ['seconds', 'minutes', 'hours'],
+        options: ['seconds', 'minutes', 'hours', 'days'],
         default: 'minutes',
       },
     ],

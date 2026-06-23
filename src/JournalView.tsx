@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { getJournal, subscribeJournal, type JournalEntry } from './journal'
 import { askText, type AiConfig } from './ai'
 import Icon from './Icon'
+import Logo from './Logo'
 
 // Show the real cspr.live address, but with the long hash trimmed so it stays
 // on one line: "testnet.cspr.live/deploy/32af5f17…9814d3801".
@@ -216,9 +217,13 @@ export default function JournalView({
     <div className="journal-overlay" onClick={onClose}>
       <div className="journal-modal" onClick={(e) => e.stopPropagation()}>
         <div className="journal-head">
-          <span className="journal-title">
-            <Icon name="note" size={18} /> Journal
-          </span>
+          <div className="brand">
+            <Logo size={39} />
+            <div className="brand-textcol">
+              <span className="brand-name">CasperFlow</span>
+              <span className="brand-net">Journal</span>
+            </div>
+          </div>
           <span className="journal-sub">Everything your agents and flows did, day by day.</span>
           <button className="journal-close" onClick={onClose} aria-label="Close">
             <Icon name="x" size={16} />
@@ -337,7 +342,7 @@ export default function JournalView({
                     value={fMin}
                     onChange={(e) => setFMin(e.target.value)}
                   />
-                  <span>–</span>
+                  <span className="jf-dash">–</span>
                   <input
                     className="jf-num"
                     type="number"
@@ -379,9 +384,11 @@ export default function JournalView({
                     <span className="je-kind">
                       <span className={`journal-kind kind-${e.kind}`}>{e.kind}</span>
                     </span>
+                    <span className="je-status">
+                      <span className={`journal-status js-${e.status}`}>{e.status}</span>
+                    </span>
                     <span className="je-title" title={e.title}>
                       <span className="journal-entry-text">{e.title}</span>
-                      <span className={`journal-status js-${e.status}`}>{e.status}</span>
                     </span>
                     <span className="je-amount">
                       {e.amount != null ? (

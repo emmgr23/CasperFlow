@@ -145,13 +145,22 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
         const st = statusOf(d.moduleType)
         // Beta / Soon shown as a little sticker stuck on the top-right corner,
         // poking slightly outside the card. "Live" is the default → no label.
-        if (status === 'running' || status === 'done' || st === 'live') return null
+        // Hidden once a run validates the node (the result stamp takes its place).
+        if (status === 'running' || status === 'done' || status === 'error' || st === 'live')
+          return null
         return (
           <span className={`status-sticker status-${st}`}>
             {st === 'beta' ? 'Beta' : 'Soon'}
           </span>
         )
       })()}
+      {/* Run result as a stamp poking out of the top-right corner: green check on
+          success, red cross on failure. The card keeps its own colour, no halo. */}
+      {(status === 'done' || status === 'error') && (
+        <span className={`node-stamp ${status === 'done' ? 'stamp-done' : 'stamp-error'}`}>
+          <Icon name={status === 'done' ? 'check' : 'x'} size={18} />
+        </span>
+      )}
       <div className="node-face node-front" title="Click to edit in the Properties panel">
         <div className="node-title" style={{ color: colors.text }}>
           <Icon name={def.icon} size={17} style={{ color: colors.border, flexShrink: 0 }} />
@@ -181,8 +190,6 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
             def.label
           )}
           {status === 'running' && <span className="spinner" />}
-          {status === 'done' && <Icon name="check" size={15} className="check" />}
-          {status === 'error' && <Icon name="x" size={15} className="xmark" />}
         </div>
         {isWallet ? (
           <WalletNodeFront id={id} params={params} />

@@ -174,7 +174,14 @@ export function inferToolsFromGoal(goal: string): string[] {
     picked.add('send_cspr')
   if (/\b(stake|stakes|staking|delegate|delegates|delegation|restake|validator)\b/.test(g))
     picked.add('delegate')
-  if (/\b(attest|anchor|anchors|proof|prove|record|records|notari|certify|stamp|note|log\s+on)\b/.test(g))
+  // Only real anchoring words trigger attest. NOT bare "proof"/"note": "send me
+  // the proof link" means the explorer link of a transfer, not an on-chain anchor.
+  if (
+    /\b(attest|attests|attestation|anchor|anchors|anchored|notari[sz]e|notari[sz]ed|certify|certifies|tamper.?proof)\b/.test(
+      g,
+    ) ||
+    /\b(record|log)\s+(it|this|the\s+\w+)?\s*on(-|\s)?(chain|casper)\b/.test(g)
+  )
     picked.add('attest')
   if (/(\.cspr|cspr\.name|resolve)\b/.test(g)) picked.add('resolve_name')
   if (/\b(history|recent|past|previous|last\s+\d+|activity)\b/.test(g)) picked.add('recent_transfers')

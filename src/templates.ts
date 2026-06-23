@@ -84,6 +84,20 @@ export function autoFixGeneratedFlow(nodes: Node[], edges: Edge[]): void {
     data.params = { ...(data.params ?? {}), account: '{{walletpublic}}' }
   }
 
+  // 1c) AI Agents built from the no-code bar must default to AUTO tool selection:
+  //     the toolbox is inferred from the goal. The LLM sometimes over-specifies and
+  //     sets the node to Manual with a fixed list (e.g. leaving attest on), which
+  //     then ignores the goal. Force Auto and drop any model-supplied tool list so
+  //     the agent only ever gets the tools its goal actually needs.
+  for (const n of nodes) {
+    const data = n.data as { moduleType?: string; params?: Params }
+    if (data.moduleType !== 'agent') continue
+    const p = { ...(data.params ?? {}) }
+    p.toolsMode = 'auto'
+    delete (p as Record<string, unknown>).tools
+    data.params = p
+  }
+
   // 2) Attestation content. If the text to attest carries no {{variable}}, it would
   //    anchor a meaningless static string. Inject the real AI verdict(s) so the
   //    on-chain EIP-712 hash actually contains what the agent decided.

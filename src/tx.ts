@@ -483,7 +483,10 @@ export async function awaitExecution(
   return { status: 'pending' }
 }
 
+// Casper 2.0 native transfers / contract calls are TransactionV1, indexed by
+// cspr.live under /transaction/<hash>. (/deploy/<hash> is the legacy Deploy path
+// and 404s for these.)
 export const explorerTxUrl = (net: CasperNet, hash: string) =>
   net === 'testnet'
-    ? `https://testnet.cspr.live/deploy/${hash}`
-    : `https://cspr.live/deploy/${hash}`
+    ? `https://testnet.cspr.live/transaction/${hash}`
+    : `https://cspr.live/transaction/${hash}`

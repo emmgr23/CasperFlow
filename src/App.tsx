@@ -181,6 +181,65 @@ function setWalletParamsOnNodes(nodes: Node[], wp: Record<string, string> | null
   })
 }
 
+const isPubKeyStr = (s: string) => /^01[0-9a-fA-F]{64}$/.test(s) || /^02[0-9a-fA-F]{66}$/.test(s)
+const isAcctHashStr = (s: string) => /^[0-9a-fA-F]{64}$/.test(s)
+
+// A freshly AI-built transfer often carries a recipient as a saved-wallet NAME
+// (e.g. "wallet 5"). Resolve it to a real selection — public key + name + the
+// "My wallets" mode — so the Send CSPR card shows the recipient with its live
+// balance instead of a raw name sitting in the public-key field. Also returns the
+// public keys of every recipient, so the signer picker can refuse to bind a wallet
+// the flow is paying (which would be a self-transfer Casper rejects).
+function resolveRecipientsOnNodes(nodes: Node[]): { nodes: Node[]; recipientKeys: Set<string> } {
+  const keys = new Set<string>()
+  const out = nodes.map((n) => {
+    const d = n.data as ModuleNodeData
+    if (d.moduleType !== 'transfer') return n
+    const p: Record<string, unknown> = { ...(d.params ?? {}) }
+    const to = String(p.to ?? '').trim()
+    if (to && !isPubKeyStr(to) && !isAcctHashStr(to)) {
+      const w = resolveRecipientWallet(to)
+      if (w) {
+        p.to = w.publicHex
+        p.toName = w.name
+        p.toMode = 'wallet'
+        keys.add(w.publicHex.toLowerCase())
+        return { ...n, data: { ...d, params: p as ModuleNodeData['params'] } }
+      }
+    } else if (isPubKeyStr(to)) {
+      keys.add(to.toLowerCase())
+    }
+    return n
+  })
+  return { nodes: out, recipientKeys: keys }
+}
+
+// Pick the SIGNER wallet for a freshly built flow. Critically it never returns a
+// wallet the flow is sending TO: "Send 3 CSPR to wallet 5" makes wallet 5 the
+// recipient, so the signer must be a DIFFERENT wallet. Returns null when no usable
+// signer is named (the caller picks the fallback).
+function pickSignerWallet(text: string, recipientKeys: Set<string>): WalletProfile | null {
+  const profiles = loadWalletProfiles()
+  if (!profiles.length) return null
+  const notRecipient = (w: WalletProfile | null): w is WalletProfile =>
+    !!w && !recipientKeys.has(w.publicHex.toLowerCase())
+  const lower = text.toLowerCase()
+  // 1. Explicit signer hint: "with / from / use / using / sign with wallet N".
+  const ex = lower.match(/\b(?:with|from|use|using|sign(?:ing)?\s+with)\s+wallet\s*(\d+)/)
+  if (ex) {
+    const w = resolveRecipientWallet('wallet ' + ex[1])
+    if (notRecipient(w)) return w
+  }
+  // 2. Any wallet named OUTSIDE a recipient clause ("to/recipient/pay/→ wallet N" removed).
+  const signerText = lower
+    .replace(/\b(?:to|recipient)\s+wallet\s*\d+/g, ' ')
+    .replace(/\bpay\s+wallet\s*\d+/g, ' ')
+    .replace(/(?:->|→)\s*wallet\s*\d+/g, ' ')
+  const named = pickWalletFromText(signerText)
+  if (notRecipient(named)) return named
+  return null
+}
+
 // ── Geometry: does an edge (approximated by the straight chord between its
 // source's right-handle and its target's left-handle) cross a selection rectangle? ──
 type Pt = { x: number; y: number }
@@ -623,6 +682,15 @@ function Flow() {
   const settingsRef = useRef(settings)
   settingsRef.current = settings
   const runningRef = useRef(false)
+  // Set by the Stop button to abort an in-flight run. The run loop checks it
+  // between nodes, and the agent loop checks it between LLM turns, so a run that
+  // misbehaves (or loops) can always be cancelled.
+  const abortRef = useRef(false)
+  const stopRun = () => {
+    if (!runningRef.current) return
+    abortRef.current = true
+    appendLog('⏹ Stopping the run… (finishing the current step)', 'warn')
+  }
 
   const [live, setLive] = useState(false)
   const [liveInterval, setLiveInterval] = useState('')
@@ -1178,12 +1246,21 @@ function Flow() {
       appendLog('AI returned no valid actions — try rephrasing.', 'warn')
       return
     }
-    // Auto-bind a wallet the user named in their description (e.g. "use wallet 3").
-    const picked = pickWalletFromText(description)
-    if (picked && flow.nodes.some((n) => (n.data as ModuleNodeData).moduleType === 'wallet')) {
-      flow.nodes = setWalletParamsOnNodes(flow.nodes, profileToWalletParams(picked))
-      debugLog('ai', `Bound wallet "${picked.name}" to the generated Wallet node`)
+    // Resolve any saved-wallet recipient NAME into a real selection (key + balance),
+    // then bind a SIGNER — but ONLY a wallet the user explicitly named. We never
+    // auto-pick the paying wallet: spending real funds from a wallet the user did
+    // not choose is exactly the kind of silent guess we must not make. If no signer
+    // is named, the Wallet card is left on "Select a wallet" and we say so.
+    const resolved = resolveRecipientsOnNodes(flow.nodes)
+    flow.nodes = resolved.nodes
+    const signer = pickSignerWallet(description, resolved.recipientKeys)
+    const hasWalletNode = flow.nodes.some((n) => (n.data as ModuleNodeData).moduleType === 'wallet')
+    if (signer && hasWalletNode) {
+      flow.nodes = setWalletParamsOnNodes(flow.nodes, profileToWalletParams(signer))
+      debugLog('ai', `Bound signer wallet "${signer.name}" (recipients excluded)`)
     }
+    const needsWalletChoice = hasWalletNode && !signer
+    setWalletMissing(needsWalletChoice)
     flow.nodes = tagBornNodes(flow.nodes)
     setShowGallery(false)
     const list = snapshotCurrent()
@@ -1193,7 +1270,18 @@ function Flow() {
     switchWorkspaceTo(id, [...list, ws])
     autoArrange()
     debugLog('ai', `Built "${result.name}" from prompt (${flow.nodes.length} nodes)`)
-    setLog([{ t: now(), kind: 'ok', text: `Built "${result.name}" from your description — review the cards and Run.` }])
+    setLog([
+      { t: now(), kind: 'ok', text: `Built "${result.name}" from your description — review the cards and Run.` },
+      ...(needsWalletChoice
+        ? [
+            {
+              t: now(),
+              kind: 'warn' as const,
+              text: 'You did not say which wallet pays. Open the Wallet card and choose the paying wallet before you Run.',
+            },
+          ]
+        : []),
+    ])
     // Let the build cascade + electric wave finish before the "agent ready"
     // popup appears (matches the node born window).
     setTimeout(() => {
@@ -1212,6 +1300,10 @@ function Flow() {
   }
   useEffect(resizeCmd, [cmdValue])
   const [goLivePrompt, setGoLivePrompt] = useState(false)
+  // True when a freshly built/edited flow signs CSPR but no paying wallet is
+  // selected yet. The "ready" popup then asks the user to choose a wallet instead
+  // of offering Run / Go live (the agent cannot run without a signer).
+  const [walletMissing, setWalletMissing] = useState(false)
   const [autoSign, setAutoSign] = useState(true)
   const autoSignRef = useRef(true)
   type ApprovalInfo = {
@@ -1274,16 +1366,26 @@ function Flow() {
       appendLog('AI returned no valid actions — try rephrasing.', 'warn')
       return
     }
-    // Bind the wallet: a name in the instruction wins; otherwise keep the one already selected.
-    const picked = pickWalletFromText(instruction)
-    let wp: Record<string, string> | null = picked ? profileToWalletParams(picked) : null
+    // Resolve recipient names to real selections (key + balance), then bind a SIGNER
+    // that is never a recipient: a wallet explicitly named in the instruction wins;
+    // otherwise keep the wallet already selected on the canvas. Never auto-pick the
+    // recipient as the signer (that was the self-transfer bug).
+    const resolved = resolveRecipientsOnNodes(flow.nodes)
+    const signer = pickSignerWallet(instruction, resolved.recipientKeys)
+    let wp: Record<string, string> | null = signer ? profileToWalletParams(signer) : null
     if (!wp) {
       const cur = nodesRef.current.find((n) => (n.data as ModuleNodeData).moduleType === 'wallet')
       const cp = cur?.data ? (cur.data as ModuleNodeData).params : undefined
       if (cp && typeof cp.walletSecret === 'string' && cp.walletSecret) wp = cp as Record<string, string>
     }
-    if (picked) debugLog('ai', `Bound wallet "${picked.name}" to the Wallet node`)
-    const boundNodes = tagBornNodes(setWalletParamsOnNodes(flow.nodes, wp))
+    if (signer) debugLog('ai', `Bound signer wallet "${signer.name}" (recipients excluded)`)
+    const boundNodes = tagBornNodes(setWalletParamsOnNodes(resolved.nodes, wp))
+    const hasWallet = boundNodes.some((n) => (n.data as ModuleNodeData).moduleType === 'wallet')
+    const hasSigner = boundNodes.some((n) => {
+      const d = n.data as ModuleNodeData
+      return d.moduleType === 'wallet' && !!String(d.params?.walletSecret || '')
+    })
+    setWalletMissing(hasWallet && !hasSigner)
     setNodes(boundNodes)
     setEdges(decorateEdges(flow.edges))
     autoArrange()
@@ -1612,6 +1714,7 @@ function Flow() {
   const runCycle = async (cycleLabel?: string): Promise<boolean> => {
     if (runningRef.current) return true
     runningRef.current = true
+    abortRef.current = false
     setRunning(true)
     let flowHasDoer = false
     let didAct = false
@@ -1779,6 +1882,11 @@ function Flow() {
     }
 
     while (queue.length > 0) {
+      // User pressed Stop: abandon the rest of the flow cleanly.
+      if (abortRef.current) {
+        appendLog('⏹ Run stopped by you. No further steps were taken.', 'warn')
+        break
+      }
       const id = queue.shift()!
       if (visited.has(id)) continue
       visited.add(id)
@@ -1844,7 +1952,7 @@ function Flow() {
         }
         appendLog(
           has
-            ? `Wallet "${name || 'wallet'}" ready (${bag.walletbalance != null ? bag.walletbalance + ' CSPR' : 'balance n/a'}) — connected actions will sign with it.`
+            ? `Wallet "${name || 'wallet'}" ready (${bag.walletbalance != null ? bag.walletbalance + ' CSPR' : 'balance n/a'}), connected actions will sign with it.`
             : `Wallet: no wallet selected — pick one on the card.`,
           has ? 'info' : 'warn',
         )
@@ -2044,7 +2152,15 @@ function Flow() {
           }
           const validKey = isKey(to)
           const validHash = isHash(to)
-          if (!to || to.startsWith('02c4d6')) {
+          if (!signerHex) {
+            // No paying wallet chosen → stop with a clear instruction instead of
+            // trying to sign with an empty key (which fails with a cryptic error).
+            appendLog(
+              'Send CSPR: no paying wallet is selected. Open the Wallet card, choose the wallet that pays, then Run again.',
+              'warn',
+            )
+            branchStops = true
+          } else if (!to || to.startsWith('02c4d6')) {
             appendLog('Send CSPR (LIVE): set a real recipient (key, wallet, or CSPR.name) first — skipped.', 'warn')
           } else if (!validKey && !validHash) {
             appendLog(
@@ -2477,7 +2593,16 @@ function Flow() {
               substituteVars(String(params.goal || '').trim(), bag) ||
               'Use your tools to inspect the wallet and report its status.'
             // 'auto' mode infers the toolbox from the goal; 'manual' uses the picked list.
-            const enabledTools = effectiveTools(params.toolsMode, params.tools, goal)
+            let enabledTools = effectiveTools(params.toolsMode, params.tools, goal)
+            // HARD guard, independent of mode/defaults: the agent only gets the attest
+            // tool if the goal EXPLICITLY asks to anchor/attest/record on-chain. This
+            // stops an over-eager model (or a stale default list that still contains
+            // attest) from spending CSPR on an unrequested attestation — "proof link"
+            // in a goal means the explorer link of a transfer, not an anchor.
+            const goalWantsAttest =
+              /\b(attest|attestation|anchor|notari[sz]e|certify|tamper.?proof)\b/i.test(goal) ||
+              /\b(record|log)\b[^.]*\bon(-|\s)?(chain|casper)\b/i.test(goal)
+            if (!goalWantsAttest) enabledTools = enabledTools.filter((t) => t.id !== 'attest')
             const toolSpecs = enabledTools.map((t) => t.spec)
             const hasSigningTool = enabledTools.some((t) => t.signs)
             const system =
@@ -2493,6 +2618,10 @@ function Flow() {
               'ONLY values that a tool actually returned to you in this run, copied exactly. If you do not ' +
               'have a real link, do not include one. ' +
               'When messaging the user, send a single summary message; never send the same notification twice. ' +
+              'BE EFFICIENT WITH STEPS (this saves rate limits): when you need several reads, request them ' +
+              'ALL together in ONE step (parallel tool calls), not one per turn. Once you have the data, make ' +
+              'every decision and issue every send in as few steps as possible, call notify once, then finish. ' +
+              'Do not re-read something you already read, and do not add extra steps. ' +
               'Amounts are in CSPR. Be concise.'
 
             // HARD guardrail: once a signing action is blocked (self-transfer or
@@ -2500,10 +2629,18 @@ function Flow() {
             // instruction is not enough — models will try to work around a refusal
             // by changing the recipient. This makes that impossible.
             let signingLocked = false
-            // HARD guardrail for messaging: dedupe + cap, so a looping model can't
-            // spam the user's Telegram/Discord with the same notification.
-            const sentMessages = new Set<string>()
-            let notifyCount = 0
+            // Messaging is DEFERRED and AUTHORED BY US, not the model. notify() only
+            // records that the user wants a summary; we build the actual message from
+            // the real actions taken this run (each with its real explorer proof
+            // link) and send exactly ONE message at the end. This guarantees the
+            // message always has the real links and the model can never spam or send
+            // a half-empty "Sent 3 CSPR" with no proof.
+            let wantsNotify = false
+            const runReceipts: string[] = []
+            // The real explorer proof links produced this run. A notification may
+            // only include one of these, so the model cannot invent a link
+            // (e.g. example.com/proof) and pass it off as proof.
+            const realProofLinks = new Set<string>()
             // The agent's yes/no verdict (when it uses the Decide capability). A
             // "no" can stop the branch if the visible stopOnNo setting allows it.
             // Only the FINAL verdict is logged (after the run), so a self-correcting
@@ -2515,11 +2652,27 @@ function Flow() {
             // delegation) runs only ONCE per run, so a looping model cannot
             // double-send funds or anchor the same note twice.
             const completedActions = new Set<string>()
+            // Read de-duplication + a global tool budget. A weaker model (e.g. an 8B)
+            // can otherwise loop forever re-reading the same balances and never decide.
+            // We cache each balance read and, after the second read of the same
+            // account, refuse with a firm "you already have this, act now". A hard cap
+            // on TOTAL tool calls is the final backstop so no run can spin out of
+            // control regardless of the model.
+            const readCache = new Map<string, string>()
+            const readCounts = new Map<string, number>()
+            let toolBudget = 0
+            const TOOL_BUDGET_MAX = 24
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
               // Some models pass `null` (not `{}`) when a tool takes no required
               // args; guard so reading args.* never throws.
               args = args ?? {}
               try {
+                // Global backstop: once the tool budget is spent, refuse everything
+                // except the final notify, and tell the model to conclude now.
+                toolBudget++
+                if (toolBudget > TOOL_BUDGET_MAX && name !== 'notify') {
+                  return 'Tool budget reached for this run. Stop calling tools. Send to any wallets you already identified as eligible (if not done), then write your final summary and finish.'
+                }
                 const isSigning = name === 'send_cspr' || name === 'delegate' || name === 'attest'
                 if (isSigning && signingLocked) {
                   return 'Signing is locked for this run: a previous action was blocked by a guardrail. The agent may not sign anything else now. Stop and report.'
@@ -2537,9 +2690,30 @@ function Flow() {
                 if (name === 'read_balance') {
                   const acct = String((args.account ?? '') || signerHex || '').trim()
                   if (!acct) return 'No account to read: no account given and no wallet is connected.'
-                  const a = isKey(acct) || isHash(acct) ? acct : resolveRecipientWallet(acct)?.publicHex || acct
+                  const wasName = !(isKey(acct) || isHash(acct))
+                  const a = wasName ? resolveRecipientWallet(acct)?.publicHex || acct : acct
+                  const cacheKey = a.toLowerCase()
+                  const seen = (readCounts.get(cacheKey) || 0) + 1
+                  readCounts.set(cacheKey, seen)
+                  // Already read this account → return the cached value and, from the
+                  // second repeat on, firmly tell the model to stop re-reading and act.
+                  // This is what breaks the "read the same 4 balances forever" loop.
+                  if (readCache.has(cacheKey)) {
+                    const cached = readCache.get(cacheKey)!
+                    if (seen >= 3)
+                      return `STOP RE-READING. You already have every balance you need. ${cached}. Now DECIDE which wallets meet the rule, SEND to them, then notify and finish. Do not call read_balance again.`
+                    return `(already read) ${cached}. You have this balance, do not read it again; proceed to decide and act.`
+                  }
                   const info = await getAccountBalance(net, cloud, a)
-                  return info ? `Balance of ${shortKey(a)}: ${info.balance} CSPR` : 'Could not read balance.'
+                  if (!info) return 'Could not read balance.'
+                  // Echo a recipient the agent can safely reuse: the wallet NAME when we
+                  // resolved one (send_cspr accepts names), and the FULL key — never a
+                  // shortened "0202…1410" form, which the agent would copy and then fail
+                  // to send to ("not a valid recipient").
+                  const label = wasName ? `${acct} (full key ${a})` : a
+                  const out = `Balance of ${label}: ${info.balance} CSPR`
+                  readCache.set(cacheKey, out)
+                  return out
                 }
                 if (name === 'recent_transfers') {
                   const acct = String(args.account || signerHex)
@@ -2569,35 +2743,21 @@ function Flow() {
                   return `Decision recorded: ${v}.${v === 'no' ? ' The flow may stop here; do not take further action.' : ' Proceed.'}`
                 }
                 if (name === 'notify') {
-                  const msg = String(args.message || '').trim()
-                  if (!msg) return 'Refused: empty message.'
-                  // Reject placeholders like <attest_link> or [block_hash]: the model
-                  // must paste the real value a tool returned, not a stand-in.
-                  if (/<[a-z0-9_ ]+>|\[[a-z0-9_ ]+\]/i.test(msg))
-                    return 'Refused: your message contains a placeholder (e.g. <attest_link>) instead of a real value. Copy the exact link a tool returned, then send.'
-                  if (sentMessages.has(msg))
-                    return 'Already sent this exact message this run. Do NOT notify again; stop.'
-                  if (notifyCount >= 3)
-                    return 'Notification limit reached for this run (3). Do NOT notify again; stop.'
-                  // Count the attempt (even if it fails or no channel) so the agent
-                  // cannot loop on notify.
-                  sentMessages.add(msg)
-                  notifyCount++
-                  const tgToken = settingsRef.current.telegramToken || ''
-                  const tgChat = settingsRef.current.telegramChatId || ''
-                  const dh = settingsRef.current.discordWebhook || ''
-                  if (tgToken && tgChat) {
-                    const ok = await sendTelegram(tgToken, tgChat, msg)
-                    return ok ? 'Message sent on Telegram.' : 'Telegram send failed (check the token/chat in Settings).'
-                  }
-                  if (dh && isDiscordWebhook(dh)) {
-                    const ok = await sendDiscord(dh, msg)
-                    return ok ? 'Message sent on Discord.' : 'Discord send failed (check the webhook in Settings).'
-                  }
-                  return 'No messaging channel is configured. Add a Telegram bot or a Discord webhook in Settings → Integrations to enable this.'
+                  // We do NOT use the model's wording. Calling notify simply records
+                  // that the user wants a summary; we compose the real message from
+                  // the actions taken this run (with their real proof links) and send
+                  // it once after the run. So the model can pass anything (or nothing)
+                  // here and it cannot send a link-less or duplicate message.
+                  wantsNotify = true
+                  return 'Acknowledged. A summary with the real proof links will be sent to the user automatically once, at the end of the run. Do not call notify again.'
                 }
                 if (name === 'send_cspr') {
                   let to = String(args.to || '').trim().replace(/^account-hash-/i, '')
+                  // A shortened key copied from a balance line ("0202c8…1410") is not a
+                  // real recipient. Tell the agent to use the wallet NAME or the full key
+                  // instead of failing with a vague "not a valid recipient".
+                  if (/[…]|\.\.\./.test(to))
+                    return `Refused: "${to}" is a shortened key, not a real address. Send to the wallet NAME (e.g. "wallet 2") or paste the FULL public key, not the abbreviated "0202…abcd" form.`
                   if (to && !isKey(to) && !isHash(to)) {
                     const m = resolveRecipientWallet(to)
                     if (m?.publicHex) to = m.publicHex
@@ -2681,7 +2841,7 @@ function Flow() {
                   recordSpend(amt)
                   didAct = true
                   const url = explorerTxUrl(net, r.hash || '')
-                  appendLog(`Agent sent ${amt} CSPR -> ${to.slice(0, 8)}… · ${url}`, 'info')
+                  realProofLinks.add(url)
                   const ex = await awaitExecution(net, r.hash || '')
                   if (walletKey) refreshWalletBalance(walletKey)
                   recordJournal({
@@ -2701,6 +2861,7 @@ function Flow() {
                     gasRefundMotes: ex.refund,
                     net,
                   })
+                  runReceipts.push(`Sent ${amt} CSPR to ${String(args.to)}\n${url}`)
                   return `Sent ${amt} CSPR. On-chain status: ${ex.status}.${gasNote(ex.cost)} Proof: ${url}`
                 }
                 if (name === 'delegate') {
@@ -2731,6 +2892,7 @@ function Flow() {
                   recordSpend(amt)
                   didAct = true
                   const durl = explorerTxUrl(net, r.hash || '')
+                  realProofLinks.add(durl)
                   const exD = await awaitExecution(net, r.hash || '')
                   recordJournal({
                     actor: agentActor,
@@ -2748,6 +2910,7 @@ function Flow() {
                     gasRefundMotes: exD.refund,
                     net,
                   })
+                  runReceipts.push(`Delegated ${amt} CSPR to ${validator.slice(0, 10)}…\n${durl}`)
                   return `Delegated ${amt} CSPR. Proof: ${durl}`
                 }
                 if (name === 'attest') {
@@ -2783,6 +2946,7 @@ function Flow() {
                   recordSpend(amt)
                   didAct = true
                   const url = explorerTxUrl(net, r.hash || '')
+                  realProofLinks.add(url)
                   bag.attesturl = url
                   bag.txurl = url
                   const exA = await awaitExecution(net, r.hash || '')
@@ -2802,6 +2966,7 @@ function Flow() {
                     gasRefundMotes: exA.refund,
                     net,
                   })
+                  runReceipts.push(`Anchored a note on Casper: "${note.slice(0, 50)}"\n${url}`)
                   return `Anchored on Casper. Claim ${att.claimHash.slice(0, 18)}… (the 2.5 CSPR anchor went to your own wallet, recoverable, not a fee) Proof: ${url}`
                 }
                 return `Unknown tool: ${name}`
@@ -2810,31 +2975,67 @@ function Flow() {
               }
             }
 
-            appendLog(`Autonomous Agent "${role}" starting…`, 'info')
+            appendLog(`AI Agent "${role}" starting…`, 'info')
             let toolCallCount = 0
             const result = await runAgent(aiCfg, {
               system,
               goal,
               tools: toolSpecs,
               executeTool: exec,
+              shouldStop: () => abortRef.current,
               maxSteps: Math.max(2, Math.min(12, Number(params.maxSteps) || 6)),
               onEvent: (ev) => {
-                if (ev.kind === 'thinking' && ev.text) appendLog(`🧠 ${ev.text}`, 'step')
-                else if (ev.kind === 'tool_call') {
-                  toolCallCount++
-                  appendLog(`→ ${ev.tool}(${JSON.stringify(ev.args ?? {})})`, 'info')
+                // Clean log: only the RESULT of each step (one readable line), plus
+                // the final summary. The raw tool calls, JSON args and the model's
+                // thinking stay in the bottom Live console for debugging.
+                if (ev.kind === 'tool_call') toolCallCount++
+                // notify/decide are internal bookkeeping: their results are noise in
+                // the user-facing log (the summary is sent at the end, the final
+                // decision is logged once after the run). Keep only real step results.
+                else if (ev.kind === 'tool_result' && ev.result && ev.tool !== 'notify' && ev.tool !== 'decide')
+                  appendLog(ev.result, 'info')
+                else if (ev.kind === 'final') {
+                  // "Reached the step limit" is an internal stop reason, not a result;
+                  // showing it (with a green ✓) reads as a problem. Skip it; the
+                  // action lines, the guardrail line and "Run complete" tell the story.
+                  const t = (ev.text || '').trim()
+                  if (t && !/^reached the step limit\.?$/i.test(t)) appendLog(`✓ ${t}`, 'ok')
                 }
-                else if (ev.kind === 'tool_result' && ev.result) appendLog(`← ${ev.tool}: ${ev.result}`, 'info')
-                else if (ev.kind === 'final') appendLog(`✓ Agent: ${ev.text || '(no answer returned)'}`, 'ok')
-                else if (ev.kind === 'error' && ev.text) appendLog(`Agent error: ${ev.text}`, 'warn')
+                else if (ev.kind === 'error' && ev.text) {
+                  // A 429 is a provider quota, not a flow failure. Say so plainly and
+                  // point to the fix, instead of a cryptic "Agent error: HTTP 429".
+                  const is429 = /\b429\b|rate.?limit/i.test(ev.text)
+                  appendLog(
+                    is429
+                      ? '⏳ AI provider rate limit (HTTP 429): you hit the per-minute (or daily) token limit of this AI profile. Wait ~60s before the next run, switch AI profile/model in Settings → AI, or use fewer recipients. No funds were moved.'
+                      : `Agent error: ${ev.text}`,
+                    'warn',
+                  )
+                }
               },
             })
             // Expose the agent's final answer so later agents/steps can use it:
             // {{agent}}, {{agent2}}… (same ordering as the AGENT badge on the node).
             bag[agentVarName(currentNodes, id)] = result.finalText || '(no output)'
             // An agent that errored (e.g. provider without tool calling) must show
-            // red + stop the branch, not a green "done".
-            if (result.stopped === 'error') {
+            // red + stop the branch, not a green "done" — UNLESS it already completed
+            // real on-chain actions before the error (e.g. a provider rate-limit cut
+            // the reasoning short after the transfers went through). In that case the
+            // work is done: keep the node green and say so, instead of the misleading
+            // "the transaction did not go through".
+            if (result.stopped === 'error' && runReceipts.length > 0) {
+              appendLog(
+                'Note: the AI provider stopped early (likely a rate limit), but the actions above completed on-chain. Summary covers what was done.',
+                'warn',
+              )
+              recordJournal({
+                actor: agentActor,
+                kind: 'other',
+                title: `Agent completed ${runReceipts.length} action(s), then the AI provider stopped early`,
+                status: 'success',
+                net,
+              })
+            } else if (result.stopped === 'error') {
               recordJournal({
                 actor: agentActor,
                 kind: 'other',
@@ -2892,6 +3093,49 @@ function Flow() {
               if (verdict === 'no' && String(params.stopOnNo ?? 'Yes') !== 'No') {
                 appendLog('🧭 Decision is NO, stopping the flow here.', 'warn')
                 branchStops = true
+              }
+            }
+            // A guardrail that locked signing AND let nothing through is a STOP, not a
+            // success: a green check would wrongly read as "the agent did its job".
+            // Show the node red and halt the branch so the canvas, log and Journal all
+            // say the same thing: the agent was prevented and no funds moved.
+            if (signingLocked && runReceipts.length === 0) {
+              appendLog('🛡️ Guardrail stopped the agent. No funds moved.', 'warn')
+              txFailed = true
+              branchStops = true
+            }
+            // Compose the ONE summary ourselves and send it once. Three honest cases:
+            //  - actions succeeded   → list them with their real proof links
+            //  - a guardrail blocked → say so plainly, never invent a "proof link"
+            //  - read-only run       → the model's answer, minus any URL and minus
+            //                          internal sentinels like "Reached the step limit".
+            if (wantsNotify && !abortRef.current && result.stopped !== 'aborted') {
+              const hasLinks = runReceipts.length > 0
+              let summary: string
+              if (hasLinks) {
+                summary = `Agent run summary:\n\n${runReceipts.join('\n\n')}`
+              } else if (signingLocked) {
+                summary = 'Agent run blocked by a guardrail. No funds moved this run.'
+              } else {
+                const ft = (result.finalText || '').trim()
+                const internal = !ft || /^reached the step limit\.?$/i.test(ft) || /no answer returned/i.test(ft)
+                summary = internal
+                  ? 'Agent run complete. No on-chain action was taken.'
+                  : ft.replace(/https?:\/\/\S+/g, '').replace(/\s{2,}/g, ' ').trim()
+              }
+              const sentMsg = hasLinks ? 'Summary sent on Telegram with the proof links.' : 'Summary sent on Telegram.'
+              const sentMsgD = hasLinks ? 'Summary sent on Discord with the proof links.' : 'Summary sent on Discord.'
+              const tgToken = settingsRef.current.telegramToken || ''
+              const tgChat = settingsRef.current.telegramChatId || ''
+              const dh = settingsRef.current.discordWebhook || ''
+              if (tgToken && tgChat) {
+                const ok = await sendTelegram(tgToken, tgChat, summary)
+                appendLog(ok ? sentMsg : 'Telegram send failed (check Settings).', ok ? 'ok' : 'warn')
+              } else if (dh && isDiscordWebhook(dh)) {
+                const ok = await sendDiscord(dh, summary)
+                appendLog(ok ? sentMsgD : 'Discord send failed (check Settings).', ok ? 'ok' : 'warn')
+              } else {
+                appendLog('Summary ready, but no messaging channel is configured (Settings → Integrations).', 'warn')
               }
             }
           }
@@ -3091,7 +3335,7 @@ function Flow() {
     // Compute the interval in ms from each schedule's interval + unit.
     // Ignore non-numeric values (e.g. "once") so the timer is never NaN.
     const unitMs = (u: string) =>
-      u === 'seconds' ? 1_000 : u === 'hours' ? 3_600_000 : 60_000
+      u === 'seconds' ? 1_000 : u === 'hours' ? 3_600_000 : u === 'days' ? 86_400_000 : 60_000
     const msList = schedules
       .map((s) => {
         const p = (s.data as ModuleNodeData).params
@@ -3112,7 +3356,10 @@ function Flow() {
       if (s < 3600) return ss ? `${m} min ${ss} s` : `${m} min`
       const h = Math.floor(m / 60)
       const mm = m % 60
-      return mm ? `${h} h ${mm} min` : `${h} h`
+      if (s < 86400) return mm ? `${h} h ${mm} min` : `${h} h`
+      const days = Math.floor(h / 24)
+      const hh = h % 24
+      return hh ? `${days} d ${hh} h` : `${days} d`
     }
     const bannerLabel = runOnce ? `once in ${human(intervalMs)}` : `every ${human(intervalMs)}`
     setLiveInterval(bannerLabel)
@@ -3319,16 +3566,23 @@ function Flow() {
           </button>
           <span className="tb-div" />
           <button
-            className={`btn-run btn-icon${running && !live ? ' active-run' : ''}`}
+            className={`btn-run btn-icon${running && !live ? ' active-run btn-stop' : ''}`}
             onClick={() => {
+              // While a run is in flight, the same button becomes Stop (triangle → square).
+              if (running && !live) {
+                stopRun()
+                return
+              }
               setRightTab('log')
               setShowRightPanel(true)
               runCycle()
             }}
-            disabled={running || live}
+            disabled={live}
+            title={running && !live ? 'Stop the current run' : 'Run the flow once'}
           >
-            {running && !live && <BorderSparks color="#60a5fa" />}
-            <Icon name="play" size={13} /> {running && !live ? 'Running…' : 'Run once'}
+            {running && !live && <BorderSparks color="#f87171" />}
+            <Icon name={running && !live ? 'square' : 'play'} size={13} />{' '}
+            {running && !live ? 'Stop' : 'Run once'}
           </button>
           <button
             className={`btn-primary btn-icon${live ? ' btn-stop' : ''}`}
@@ -3886,7 +4140,42 @@ function Flow() {
           </div>
         </div>
       )}
-      {goLivePrompt && (
+      {goLivePrompt && walletMissing && (
+        <div className="golive-prompt">
+          <div className="golive-prompt-row">
+            <div className="golive-prompt-icon">
+              <Icon name="wallet" size={20} />
+            </div>
+            <div className="golive-prompt-text">
+              <strong>Choose the paying wallet first</strong>
+              <span>
+                This agent sends CSPR, but no paying wallet is selected. Open the Wallet card and pick the
+                wallet that pays before you run.
+              </span>
+            </div>
+          </div>
+          <div className="golive-prompt-actions">
+            <button className="btn-secondary settings-test" onClick={() => setGoLivePrompt(false)}>
+              Not yet
+            </button>
+            <button
+              className="btn-primary settings-test"
+              onClick={() => {
+                setGoLivePrompt(false)
+                const w = nodesRef.current.find((n) => (n.data as ModuleNodeData).moduleType === 'wallet')
+                if (w) {
+                  setNodes((ns) => ns.map((n) => ({ ...n, selected: n.id === w.id })))
+                  setRightTab('props')
+                  setShowRightPanel(true)
+                }
+              }}
+            >
+              <Icon name="wallet" size={13} /> Choose wallet
+            </button>
+          </div>
+        </div>
+      )}
+      {goLivePrompt && !walletMissing && (
         <div className="golive-prompt">
           <div className="golive-prompt-row">
             <div className="golive-prompt-icon">

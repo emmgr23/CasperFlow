@@ -17,6 +17,7 @@ Built for the **Casper Agentic Buildathon 2026**.
 - [What it is](#what-it-is)
 - [What's real today](#whats-real-today)
 - [The flagship: Treasury Guardian](#the-flagship-treasury-guardian)
+- [Screenshots](#screenshots)
 - [Quick start](#quick-start)
 - [Build your first agent](#build-your-first-agent)
 - [Optional: run the x402 demo server](#optional-run-the-x402-demo-server)
@@ -64,6 +65,46 @@ A recurring payroll agent for a DAO treasury, built from a single sentence and r
 6. A full Telegram report is delivered with every transaction proof link.
 
 When the treasury drops below the safe threshold, the guardrail refuses to pay and stops the agent on its own. Every step is a real, final transaction you can open on the public Casper explorer.
+
+## Screenshots
+
+Five end-to-end scenarios, each run for real on Casper testnet. Every transfer and attestation shown is a final transaction on the public explorer.
+
+### 1. An autonomous agent that acts, and proves it
+
+Describe the agent's job in plain English and pick its tools (or let it infer them from the goal). It reads its balance, sends CSPR by itself with no wallet popup, anchors a note on Casper, and reports back, every step a real transaction.
+
+| Configure it in one sentence | It runs and proves on-chain |
+| --- | --- |
+| ![Agent configuration](docs/screenshots/1a-agent-config.png) | ![Agent run with on-chain proofs](docs/screenshots/1b-agent-run.png) |
+
+### 2. Guardrails that stop it
+
+Ask the agent to overspend and the *Spend limit* blocks it: signing locks for the rest of the run, the node turns red, and no funds move. Refusing to act is a first-class, provable outcome.
+
+![Guardrail blocks an over-budget agent](docs/screenshots/2-guardrail-block.png)
+
+### 3. From one sentence to a working agent
+
+Type a request in the command bar and CasperFlow assembles the flow for you, then runs it for real, transfer plus a Telegram proof.
+
+| Describe it | Built and executed |
+| --- | --- |
+| ![Build an agent from a prompt](docs/screenshots/3a-build-from-prompt.png) | ![The generated agent runs](docs/screenshots/3b-generated-run.png) |
+
+### 4. Conditional, multi-wallet reasoning
+
+A richer instruction: check several wallets and pay only those under a threshold. The agent reads each balance, decides per recipient, pays the eligible ones, skips the rest, and explains why, in a few seconds.
+
+| The instruction | The reasoned run |
+| --- | --- |
+| ![A conditional multi-wallet instruction](docs/screenshots/4a-conditional-prompt.png) | ![The agent pays only eligible wallets](docs/screenshots/4b-conditional-run.png) |
+
+### 5. Everything is audited: the Journal
+
+Every action, success, blocked, or failed, is recorded day by day with its on-chain proof link, in an aligned ledger with a GitHub-style activity calendar. Nothing is hand-wavy.
+
+![The Journal audit ledger](docs/screenshots/5-journal.png)
 
 ## Quick start
 

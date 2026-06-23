@@ -373,10 +373,40 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
   const [models, setModels] = useState<string[]>([])
   const [modelStatus, setModelStatus] = useState('')
   const [profileName, setProfileName] = useState('')
+  // When set, "Save profile" UPDATES this existing profile (model, key, etc.)
+  // instead of creating a new one — the pencil button on a profile starts editing.
+  const [editingProfileId, setEditingProfileId] = useState('')
+  // Which profile currently has its API key revealed (eye toggle). Keys are masked
+  // by default; the user can reveal one to copy it back if they lost it.
+  const [revealedKeyId, setRevealedKeyId] = useState('')
   const [, forceUpdate] = useState(0)
 
   const saveProfile = () => {
     const name = profileName.trim() || PROVIDER_LABELS[settings.aiProvider]
+    // Editing an existing profile: update it in place (keep its id), so changing
+    // the model/key doesn't spawn a duplicate. Otherwise create a new profile.
+    if (editingProfileId) {
+      const updated = settings.aiProfiles.map((p) =>
+        p.id === editingProfileId
+          ? {
+              ...p,
+              name,
+              provider: settings.aiProvider,
+              apiKey: settings.aiKey,
+              model: settings.aiModel,
+              baseUrl: settings.aiBaseUrl,
+              connected: aiStatus.startsWith('Connected'),
+            }
+          : p,
+      )
+      const patch: Partial<typeof settings> = { aiProfiles: updated }
+      // If we edited the active profile, keep it active (already loaded in the form).
+      if (settings.activeProfileId === editingProfileId) patch.activeProfileId = editingProfileId
+      set(patch)
+      setEditingProfileId('')
+      setProfileName('')
+      return
+    }
     const id = `p${Date.now()}`
     const prof: AiProfile = {
       id,
@@ -389,6 +419,15 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
     }
     set({ aiProfiles: [...settings.aiProfiles, prof], activeProfileId: id })
     setProfileName('')
+  }
+
+  // Load a profile into the "Edit / add configuration" form for editing. Reuses
+  // activateProfile to fill provider/key/model/baseUrl, then marks it as the one
+  // being edited so Save updates it instead of adding a copy.
+  const editProfile = (p: AiProfile) => {
+    activateProfile(p)
+    setProfileName(p.name)
+    setEditingProfileId(p.id)
   }
 
   const activateProfile = (p: AiProfile) => {
@@ -909,6 +948,24 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                               </span>
                             )
                           })()}
+                          {revealedKeyId === p.id && (
+                            <div className="ai-profile-key" onClick={(e) => e.stopPropagation()}>
+                              <code>{p.apiKey || '(no key saved)'}</code>
+                              {p.apiKey && (
+                                <button
+                                  type="button"
+                                  className="ai-profile-key-copy"
+                                  title="Copy key"
+                                  onClick={(e) => {
+                                    e.stopPropagation()
+                                    navigator.clipboard?.writeText(p.apiKey)
+                                  }}
+                                >
+                                  <Icon name="copy" size={12} />
+                                </button>
+                              )}
+                            </div>
+                          )}
                         </div>
                         <div className="ai-profile-side">
                           {!active && (
@@ -923,6 +980,28 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                               Connect
                             </button>
                           )}
+                          <button
+                            type="button"
+                            className="ai-profile-eye"
+                            title={revealedKeyId === p.id ? 'Hide API key' : 'Show API key'}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              setRevealedKeyId((cur) => (cur === p.id ? '' : p.id))
+                            }}
+                          >
+                            <Icon name={revealedKeyId === p.id ? 'eye-off' : 'eye'} size={14} />
+                          </button>
+                          <button
+                            type="button"
+                            className="ai-profile-edit"
+                            title="Edit profile (change model, key…)"
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              editProfile(p)
+                            }}
+                          >
+                            <Icon name="edit" size={14} />
+                          </button>
                           <button
                             type="button"
                             className="ai-profile-del"
@@ -1029,7 +1108,7 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
             </button>
             {aiStatus && <div className="settings-status">{aiStatus}</div>}
 
-            <div className="settings-section">Save as profile</div>
+            <div className="settings-section">{editingProfileId ? 'Edit profile' : 'Save as profile'}</div>
             <div className="ai-profile-save">
               <input
                 type="text"
@@ -1038,8 +1117,19 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                 onChange={(e) => setProfileName(e.target.value)}
               />
               <button className="btn-primary settings-test" onClick={saveProfile}>
-                Save profile
+                {editingProfileId ? 'Save changes' : 'Save profile'}
               </button>
+              {editingProfileId && (
+                <button
+                  className="btn-secondary settings-test"
+                  onClick={() => {
+                    setEditingProfileId('')
+                    setProfileName('')
+                  }}
+                >
+                  Cancel
+                </button>
+              )}
             </div>
             <div className="settings-note">
               Save the current provider, key, base URL and model as a reusable profile, then switch

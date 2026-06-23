@@ -161,7 +161,7 @@ const BUILDER_GUIDE =
   '- "prove / attest / anchor / record the decision on-chain / tamper-proof" → attest\n' +
   '- "receipt / proof of payment" → receipt\n' +
   '- "stake / delegate" → stake; "swap / trade X for Y" → swap; "deploy a token" → deploytoken; "deploy an NFT collection" → deploynft; "mint an NFT" → mintnft\n' +
-  '- "every N minutes/hours" → schedule (Repeat every); "in N seconds/minutes" → schedule (Once after); "when price drops/rises" → price; "when I receive a transfer" → incoming\n\n' +
+  '- "every N seconds/minutes/hours/days" → schedule (Repeat every; "every day"/"daily" → interval 1, unit days); "in N seconds/minutes" → schedule (Once after); "when price drops/rises" → price; "when I receive a transfer" → incoming\n\n' +
   'VARIABLES: results are exposed as {{variables}} you may drop into text params (message, data, title, content). ' +
   'Use ONLY these exact names — NEVER invent new ones:\n' +
   '{{hash}} = last transaction / settlement hash · {{txurl}} = last explorer link / proof link · {{amount}} = last amount · ' +
@@ -177,7 +177,9 @@ const BUILDER_GUIDE =
   'EXAMPLES (loose input → correct JSON):\n' +
   'User: "ping me on telegram when cspr drops under 2 cents" → {"name":"CSPR drop alert","steps":[{"type":"price","params":{"mode":"goes below","threshold":0.02}},{"type":"notify","params":{"message":"CSPR dropped to ${{price}}"}}]}\n' +
   'User: "with wallet 3, buy a signal from my paid api and text me the proof link" → {"name":"Signal buyer","steps":[{"type":"wallet","params":{"walletName":"wallet 3"}},{"type":"x402","params":{}},{"type":"notify","params":{"message":"Signal bought · proof {{txurl}}"}}]}\n' +
-  'User: "every hour, if the AI says it is safe, send 5 cspr to wallet 2 and anchor the decision on casper" → {"name":"Guarded payout","steps":[{"type":"schedule","params":{"repeat":"Repeat every","interval":1,"unit":"hours"}},{"type":"wallet","params":{"walletName":"wallet 2"}},{"type":"ai","params":{"instruction":"Is it safe to send the payout now?"}},{"type":"transfer","params":{"amount":5}},{"type":"attest","params":{"topic":"payout-decision","data":"AI verdict {{aidecision}}: {{ai}}"}}]}\n'
+  'User: "every hour, if the AI says it is safe, send 5 cspr to wallet 2 and anchor the decision on casper" → {"name":"Guarded payout","steps":[{"type":"schedule","params":{"repeat":"Repeat every","interval":1,"unit":"hours"}},{"type":"wallet","params":{"walletName":"wallet 2"}},{"type":"ai","params":{"instruction":"Is it safe to send the payout now?"}},{"type":"transfer","params":{"amount":5}},{"type":"attest","params":{"topic":"payout-decision","data":"AI verdict {{aidecision}}: {{ai}}"}}]}\n\n' +
+  'AGENT RULE (run-time reasoning / per-item conditions): when the task needs a decision the app cannot pre-compute — checking EACH recipient\'s balance, "only pay those under N", "decide then act", "pick the cheapest" — emit a SINGLE `agent` step with the whole task written in plain English in its `goal` param, and set maxSteps to about 10 for multi-recipient or multi-step goals. Do NOT express per-recipient balance checks with `condition`/`transfer` steps: a `condition` only sees the SIGNING wallet\'s balance and stops the whole branch, so it cannot skip individual recipients. Put exactly one `wallet` step before the agent so it can sign.\n' +
+  'User: "with wallet 3, check wallet 1, wallet 2 and wallet 5 and send 4 CSPR only to the ones holding less than 3000 CSPR, then message me who you paid with the proof links" → {"name":"Conditional payout","steps":[{"type":"wallet","params":{"walletName":"wallet 3"}},{"type":"agent","params":{"role":"Treasury operator","goal":"Check the balance of wallet 1, wallet 2 and wallet 5. Send 4 CSPR only to those holding less than 3000 CSPR; skip the others. Then message me a summary of who you paid, with the proof links.","maxSteps":10}}]}\n'
 
 // Edit an existing workflow from a natural-language instruction (iOS-26 style refine).
 // Receives the current flow as a compact description; returns the full updated steps.
@@ -419,12 +421,15 @@ export interface AgentRunOptions {
   executeTool: (name: string, args: Record<string, unknown>) => Promise<string>
   maxSteps?: number
   onEvent?: (e: AgentEvent) => void
+  // Polled between LLM turns; when it returns true the loop stops cleanly so the
+  // user's Stop button can abort a long or looping run.
+  shouldStop?: () => boolean
 }
 
 export interface AgentResult {
   finalText: string
   steps: number
-  stopped: 'done' | 'maxsteps' | 'error'
+  stopped: 'done' | 'maxsteps' | 'error' | 'aborted'
 }
 
 const isOpenAiCompatible = (p: AiProvider) =>
@@ -532,6 +537,10 @@ async function runAgentClaude(
   ]
   let steps = 0
   while (steps < maxSteps) {
+    if (opts.shouldStop?.()) {
+      emit({ kind: 'final', text: 'Stopped by the user.' })
+      return { finalText: 'Stopped by the user.', steps, stopped: 'aborted' }
+    }
     const r = await fetch('https://api.anthropic.com/v1/messages', {
       method: 'POST',
       headers: {
@@ -615,13 +624,31 @@ async function runAgentOpenAi(
   ]
   let steps = 0
   while (steps < maxSteps) {
-    const r = await fetch(url, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
-      body: JSON.stringify({ model: cfg.model, temperature: 0, messages, tools, tool_choice: 'auto' }),
-    })
-    if (!r.ok) {
-      emit({ kind: 'error', text: `${cfg.provider} HTTP ${r.status}` })
+    if (opts.shouldStop?.()) {
+      emit({ kind: 'final', text: 'Stopped by the user.' })
+      return { finalText: 'Stopped by the user.', steps, stopped: 'aborted' }
+    }
+    const body = JSON.stringify({ model: cfg.model, temperature: 0, messages, tools, tool_choice: 'auto' })
+    // Free tiers (e.g. Groq) rate-limit with HTTP 429 when an agent makes many
+    // calls in a burst. Retry a few times with backoff (honoring Retry-After)
+    // before giving up, so a transient limit doesn't abort a run mid-way.
+    let r: Response | null = null
+    for (let attempt = 0; attempt < 4; attempt++) {
+      r = await fetch(url, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json', authorization: `Bearer ${cfg.apiKey}` },
+        body,
+      })
+      if (r.status !== 429 && r.status < 500) break
+      if (attempt < 3) {
+        const ra = Number(r.headers.get('retry-after'))
+        const waitMs = Number.isFinite(ra) && ra > 0 ? ra * 1000 : 1200 * (attempt + 1)
+        emit({ kind: 'thinking', text: `Rate limited (HTTP ${r.status}); retrying in ${Math.round(Math.min(8000, waitMs) / 1000)}s…` })
+        await new Promise((res) => setTimeout(res, Math.min(8000, waitMs)))
+      }
+    }
+    if (!r || !r.ok) {
+      emit({ kind: 'error', text: `${cfg.provider} HTTP ${r?.status ?? 'network'}` })
       return { finalText: '', steps, stopped: 'error' }
     }
     const j = await r.json()
@@ -637,6 +664,16 @@ async function runAgentOpenAi(
     )
       ? msg.tool_calls
       : []
+    // A capable model issues a few tool calls per turn. Dozens at once means a weak
+    // model is looping instead of deciding; executing them all bloats the request
+    // until the provider rejects it (HTTP 413). Stop early with clear guidance.
+    if (toolCalls.length > 10) {
+      emit({
+        kind: 'error',
+        text: `The model requested ${toolCalls.length} tool calls in a single step and is looping instead of deciding. Stopped before overloading the request. Use a stronger model for multi-step agents (Groq llama-3.3-70b-versatile, Claude, or OpenAI).`,
+      })
+      return { finalText: '', steps, stopped: 'error' }
+    }
     if (msg.content) emit({ kind: 'thinking', text: String(msg.content) })
     if (toolCalls.length === 0) {
       const finalText = String(msg.content ?? '')

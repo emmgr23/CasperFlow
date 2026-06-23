@@ -713,24 +713,25 @@ body {
   box-shadow: 0 0 30px color-mix(in srgb, var(--node-color) 45%, transparent),
     inset 0 1px 0 rgba(255, 255, 255, 0.09);
 }
-/* Validated by a run → GREEN. Run-status outranks selection (extra .react-flow__node
-   prefix) so a node stays green/red even if it's still selected. */
-.react-flow__node .node-card.status-done .node-face {
-  border-color: rgba(74, 222, 128, 0.65);
-  box-shadow:
-    0 0 0 1px rgba(74, 222, 128, 0.45),
-    0 0 22px 4px rgba(74, 222, 128, 0.22),
-    inset 0 1px 0 rgba(255, 255, 255, 0.08);
-}
+/* A finished run no longer recolours the whole card; the node keeps its own
+   category colour and the result shows as a corner stamp instead. */
 /* Failed → RED (plus the red ✗ icon in the title). */
-.react-flow__node .node-card.status-error .node-face {
-  border-color: rgba(248, 113, 113, 0.78);
-  box-shadow:
-    0 0 0 1px rgba(248, 113, 113, 0.55),
-    0 0 22px 4px rgba(248, 113, 113, 0.3),
-    inset 0 1px 0 rgba(255, 255, 255, 0.05);
+/* Result stamp poking out of the top-right corner (like the Beta sticker). */
+.node-stamp {
+  position: absolute;
+  top: calc(-10px * var(--ui-scale, 1));
+  right: calc(-10px * var(--ui-scale, 1));
+  z-index: 7;
+  width: calc(25px * var(--ui-scale, 1)); height: calc(25px * var(--ui-scale, 1));
+  border-radius: 50%;
+  display: inline-flex; align-items: center; justify-content: center;
+  color: #fff;
+  border: 2px solid #0d1320;
+  box-shadow: 0 2px 6px rgba(0, 0, 0, 0.45);
 }
-.xmark { color: #f87171; margin-left: auto; flex-shrink: 0; filter: drop-shadow(0 0 4px rgba(248,113,113,0.7)); }
+.node-stamp svg { stroke-width: 3; }
+.stamp-done { background: #15803d; }
+.stamp-error { background: #b91c1c; }
 /* Kill React Flow's default boxy selection outline. */
 .react-flow__node.selected { outline: none !important; box-shadow: none !important; }
 .react-flow__node:focus, .react-flow__node:focus-visible { outline: none !important; }
@@ -1564,6 +1565,39 @@ body {
   color: #f87171; transition: background 0.15s, border-color 0.15s;
 }
 .ai-profile-del:hover { background: rgba(248, 113, 113, 0.16); border-color: rgba(248, 113, 113, 0.5); }
+.ai-profile-edit {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  background: rgba(96, 165, 250, 0.08);
+  border: 1px solid rgba(96, 165, 250, 0.3);
+  color: #60a5fa; transition: background 0.15s, border-color 0.15s;
+}
+.ai-profile-edit:hover { background: rgba(96, 165, 250, 0.18); border-color: rgba(96, 165, 250, 0.55); }
+.ai-profile-eye {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 30px; height: 30px; border-radius: 8px; cursor: pointer;
+  background: rgba(148, 163, 184, 0.08);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  color: #94a3b8; transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+.ai-profile-eye:hover { background: rgba(148, 163, 184, 0.16); border-color: rgba(148, 163, 184, 0.5); color: #cbd5e1; }
+.ai-profile-key {
+  display: flex; align-items: center; gap: 8px; margin-top: 6px;
+  max-width: 460px;
+}
+.ai-profile-key code {
+  flex: 1; min-width: 0; font-size: 12px; font-family: ui-monospace, monospace;
+  color: #cbd5e1; background: rgba(255, 255, 255, 0.05);
+  border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 7px;
+  padding: 5px 8px; word-break: break-all; user-select: all;
+}
+.ai-profile-key-copy {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; flex-shrink: 0; border-radius: 7px; cursor: pointer;
+  background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.3);
+  color: #94a3b8; transition: background 0.15s, color 0.15s;
+}
+.ai-profile-key-copy:hover { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; }
 .ai-profile-save { display: flex; gap: 8px; align-items: stretch; max-width: 560px; }
 .ai-profile-save input {
   flex: 1; font-size: 13.5px; padding: 9px 11px;
@@ -1655,17 +1689,34 @@ body {
 .journal-overlay {
   position: fixed; inset: 0; z-index: 200;
   background: #080c14; display: flex;
+  /* Own, stable GPU layer so the full-screen overlay doesn't flicker against
+     whatever is composited behind it. */
+  transform: translateZ(0); isolation: isolate;
+}
+
+/* Heavy backdrop-filter blur on many large surfaces causes GPU compositing
+   flicker (visible live on some machines, never in screen recordings). The
+   panels keep their dark translucent background; they just lose the blur. */
+* {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
 }
 .journal-modal {
   width: 100%; height: 100%;
   display: flex; flex-direction: column; background: #0d1320;
 }
 .journal-head {
-  display: flex; align-items: center; gap: 12px;
-  padding: 16px 20px; border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  position: relative; display: flex; align-items: center; gap: 12px;
+  min-height: 96px; padding: 16px 20px 16px 350px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
-.journal-title { display: inline-flex; align-items: center; gap: 9px; font-weight: 700; font-size: 16px; color: #e2e8f0; }
-.journal-sub { color: #64748b; font-size: 12.5px; }
+/* The brand reuses the exact app classes and is pinned (top:7 left:15) like the
+   top bar, so toggling between the app and the Journal moves nothing. */
+.journal-head .brand { cursor: default; }
+/* Here the under-name label reads "Journal" in white, a touch larger (scoped so
+   the app's teal "Testnet" is untouched). */
+.journal-head .brand-net { color: #f8fafc; font-size: 13px; }
+.journal-sub { color: #64748b; font-size: 12.5px; align-self: center; transform: translateY(6px); }
 .journal-close { margin-left: auto; background: none; border: none; color: #94a3b8; cursor: pointer; padding: 6px; border-radius: 8px; }
 .journal-close:hover { background: rgba(255, 255, 255, 0.06); color: #e2e8f0; }
 .journal-body { flex: 1; display: flex; min-height: 0; }
@@ -1760,13 +1811,14 @@ body {
 .journal-entry {
   display: grid;
   grid-template-columns:
-    48px 76px minmax(150px, 1fr) 118px 140px 100px 270px 116px;
+    48px 76px 74px minmax(150px, 1fr) 118px 140px 100px 270px 116px;
   align-items: center; gap: 14px;
   padding: 9px 14px;
   background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
 }
 .je-time { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; color: #64748b; }
 .je-kind { min-width: 0; }
+.je-status { min-width: 0; display: flex; }
 .je-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: #e2e8f0; }
 .journal-entry-text { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .je-amount { font-size: 12px; color: #cbd5e1; white-space: nowrap; }
@@ -1781,38 +1833,75 @@ body {
 .journal-status { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; flex-shrink: 0; }
 .js-success { color: #86efac; background: rgba(74, 222, 128, 0.15); }
 .js-failed { color: #fca5a5; background: rgba(248, 113, 113, 0.16); }
+.js-blocked { color: #fdba74; background: rgba(251, 146, 60, 0.16); }
 .js-pending { color: #fcd34d; background: rgba(250, 204, 21, 0.14); }
 .js-blocked { color: #fdba74; background: rgba(251, 146, 60, 0.16); }
 .journal-usd { color: #64748b; }
 
 /* Filter bar above the day's entries. */
 .journal-filters {
-  display: flex; flex-wrap: wrap; align-items: center; gap: 10px;
+  display: flex; flex-wrap: wrap; align-items: center; gap: 9px;
   margin: 4px 0 16px; padding-bottom: 14px;
   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
 }
-.jf-status { display: inline-flex; gap: 2px; background: rgba(255, 255, 255, 0.04); border-radius: 9px; padding: 2px; }
+/* Segmented status control: a single rounded track with pill tabs inside. */
+.jf-status { display: inline-flex; gap: 2px; background: rgba(255, 255, 255, 0.045); border-radius: 999px; padding: 3px; }
 .jf-pill {
   font-size: 12px; font-weight: 600; color: #94a3b8; cursor: pointer;
-  background: transparent; border: none; padding: 5px 11px; border-radius: 7px; transition: background 0.12s, color 0.12s;
+  background: transparent; border: none; padding: 5px 13px; border-radius: 999px;
+  transition: background 0.15s, color 0.15s;
 }
 .jf-pill:hover { color: #e2e8f0; }
 .jf-pill.active { background: rgba(167, 139, 250, 0.22); color: #ddd6fe; }
-.jf-select, .jf-num, .jf-search {
-  background: rgba(255, 255, 255, 0.04); border: 1px solid rgba(255, 255, 255, 0.1);
-  color: #e2e8f0; border-radius: 8px; padding: 6px 9px; font-size: 12.5px;
+
+/* The type dropdown and amount range share one soft, fully-rounded capsule look. */
+.jf-select, .jf-range {
+  display: inline-flex; align-items: center;
+  background: rgba(255, 255, 255, 0.045);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  border-radius: 999px; height: 32px; box-sizing: border-box;
+  transition: border-color 0.15s, background 0.15s;
 }
-.jf-select:focus, .jf-num:focus, .jf-search:focus { outline: none; border-color: rgba(167, 139, 250, 0.55); }
-.jf-range { display: inline-flex; align-items: center; gap: 6px; color: #64748b; font-size: 12px; }
-.jf-num { width: 64px; }
-.jf-num::-webkit-inner-spin-button { opacity: 0.4; }
-.jf-unit { color: #64748b; font-size: 11.5px; }
-.jf-search { min-width: 180px; flex: 1; }
+.jf-select:hover, .jf-range:hover { background: rgba(255, 255, 255, 0.06); }
+.jf-select:focus { border-color: rgba(167, 139, 250, 0.5); }
+
+/* Type dropdown: a clean capsule with a custom chevron (no native chrome). */
+.jf-select {
+  color: #cbd5e1; font-size: 12.5px; font-weight: 500; cursor: pointer;
+  padding: 0 30px 0 14px; appearance: none; -webkit-appearance: none; outline: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'/%3E%3C/svg%3E");
+  background-repeat: no-repeat; background-position: right 12px center;
+}
+.jf-select option { background: #0f172a; color: #e2e8f0; }
+
+/* Amount range: compact, spinner arrows removed entirely. */
+.jf-range { gap: 4px; padding: 0 13px; }
+.jf-num {
+  width: 42px; background: transparent; border: none; outline: none;
+  color: #e2e8f0; font-size: 12.5px; text-align: center; padding: 0;
+  -moz-appearance: textfield; appearance: textfield;
+}
+.jf-num::-webkit-outer-spin-button, .jf-num::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+.jf-num::placeholder { color: #64748b; }
+.jf-dash { color: #475569; font-size: 12px; }
+.jf-unit { color: #64748b; font-size: 11px; font-weight: 600; letter-spacing: 0.04em; margin-left: 3px; }
+
+/* Search: a sober underline line, like the palette's "Search modules…". Not full
+   width — just enough to type a recipient or agent name. */
+.jf-search {
+  width: 200px; background: none; color: #e2e8f0;
+  font-size: 12.5px; padding: 7px 2px;
+  border: none; border-bottom: 1px solid rgba(255, 255, 255, 0.12); border-radius: 0;
+}
+.jf-search:focus { outline: none; border-bottom-color: rgba(167, 139, 250, 0.6); }
+.jf-search::placeholder { color: #475569; }
+
+/* Clear: a quiet text action, not a boxed button. */
 .jf-reset {
-  font-size: 12px; color: #fca5a5; cursor: pointer; background: transparent;
-  border: 1px solid rgba(248, 113, 113, 0.3); border-radius: 8px; padding: 6px 11px;
+  font-size: 12px; font-weight: 600; color: #fca5a5; cursor: pointer;
+  background: transparent; border: none; padding: 6px 8px;
 }
-.jf-reset:hover { background: rgba(248, 113, 113, 0.12); }
+.jf-reset:hover { color: #fecaca; text-decoration: underline; }
 .console-line.ctag-error .console-tag,
 .console-line.ctag-console-error .console-tag { color: #f87171; }
 .console-line.ctag-error .console-msg,
