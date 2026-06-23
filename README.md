@@ -8,7 +8,7 @@ Built for the **Casper Agentic Buildathon 2026**.
 
 [🎬 Demo video](https://www.youtube.com/watch?v=hexnF7Gd9lw) · [💻 GitHub](https://github.com/emmgr23/CasperFlow) · [📦 MCP server (npm)](https://www.npmjs.com/package/casperflow-mcp)
 
-![CasperFlow visual canvas](Screenshot%202026-06-16%20at%2010.40.10.png)
+![CasperFlow visual canvas: a treasury agent running on Casper testnet](docs/screenshots/1b-agent-run.png)
 
 ---
 
