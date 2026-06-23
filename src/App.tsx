@@ -2511,6 +2511,10 @@ function Flow() {
             let agentVerdict: 'yes' | 'no' | null = null
             let agentVerdictReason = ''
             let decideCount = 0
+            // Idempotency: a successful signing action (same send, same note, same
+            // delegation) runs only ONCE per run, so a looping model cannot
+            // double-send funds or anchor the same note twice.
+            const completedActions = new Set<string>()
             const exec = async (name: string, args: Record<string, unknown>): Promise<string> => {
               // Some models pass `null` (not `{}`) when a tool takes no required
               // args; guard so reading args.* never throws.
@@ -2601,6 +2605,8 @@ function Flow() {
                   const amt = Number(args.amount)
                   if (!(amt > 0)) return 'Refused: amount must be a positive number of CSPR.'
                   if (!isKey(to) && !isHash(to)) return `Refused: "${String(args.to)}" is not a valid recipient.`
+                  if (completedActions.has(`send:${to.toLowerCase()}:${amt}`))
+                    return 'Already sent this exact transfer this run. Do NOT send it again; stop.'
                   // Casper rejects native transfers below 2.5 CSPR. Catch it here,
                   // before signing, with a clean message (no raw RPC error) and lock
                   // signing so the agent can't bump the amount to work around it.
@@ -2671,6 +2677,7 @@ function Flow() {
                     const short = String(r.error || 'unknown error').replace(/\s+/g, ' ').slice(0, 140)
                     return `Transfer failed (${short}). Signing is now locked for this run; do not retry. Stop.`
                   }
+                  completedActions.add(`send:${to.toLowerCase()}:${amt}`)
                   recordSpend(amt)
                   didAct = true
                   const url = explorerTxUrl(net, r.hash || '')
@@ -2701,6 +2708,8 @@ function Flow() {
                   const amt = Number(args.amount)
                   if (!isKey(validator)) return 'Refused: validator must be a public key.'
                   if (!(amt > 0)) return 'Refused: amount must be positive.'
+                  if (completedActions.has(`delegate:${validator.toLowerCase()}:${amt}`))
+                    return 'Already delegated this exact amount to this validator this run. Do NOT repeat; stop.'
                   if (!enforceSpend(amt, 'Agent delegate')) {
                     signingLocked = true
                     return 'Blocked by spend limit. Signing is now locked for this run; stop.'
@@ -2718,6 +2727,7 @@ function Flow() {
                     branchStops = true
                     return `Delegate failed: ${r.error}`
                   }
+                  completedActions.add(`delegate:${validator.toLowerCase()}:${amt}`)
                   recordSpend(amt)
                   didAct = true
                   const durl = explorerTxUrl(net, r.hash || '')
@@ -2742,6 +2752,8 @@ function Flow() {
                 }
                 if (name === 'attest') {
                   const note = String(args.note || '').slice(0, 400)
+                  if (completedActions.has(`attest:${note}`))
+                    return 'Already anchored this exact note on Casper this run. Do NOT attest it again; stop.'
                   const att = buildAttestation(`agent:${note}`, signerHex)
                   const amt = 2.5
                   const anchorTo =
@@ -2767,6 +2779,7 @@ function Flow() {
                     branchStops = true
                     return `Attest failed: ${r.error}`
                   }
+                  completedActions.add(`attest:${note}`)
                   recordSpend(amt)
                   didAct = true
                   const url = explorerTxUrl(net, r.hash || '')
@@ -2864,7 +2877,7 @@ function Flow() {
             const verdict = agentVerdict as 'yes' | 'no' | null
             if (verdict) {
               appendLog(
-                `🧭 Final decision: ${verdict.toUpperCase()}${agentVerdictReason ? ` — ${agentVerdictReason}` : ''}`,
+                `🧭 Final decision: ${verdict.toUpperCase()}${agentVerdictReason ? `, ${agentVerdictReason}` : ''}`,
                 verdict === 'yes' ? 'ok' : 'warn',
               )
               // A decision is a governance event worth auditing, especially a "no"
@@ -2872,12 +2885,12 @@ function Flow() {
               recordJournal({
                 actor: agentActor,
                 kind: 'other',
-                title: `Decision: ${verdict.toUpperCase()}${agentVerdictReason ? ` — ${agentVerdictReason}` : ''}`,
+                title: `Decision: ${verdict.toUpperCase()}${agentVerdictReason ? `, ${agentVerdictReason}` : ''}`,
                 status: verdict === 'no' ? 'blocked' : 'success',
                 net,
               })
               if (verdict === 'no' && String(params.stopOnNo ?? 'Yes') !== 'No') {
-                appendLog('🧭 Decision is NO — stopping the flow here.', 'warn')
+                appendLog('🧭 Decision is NO, stopping the flow here.', 'warn')
                 branchStops = true
               }
             }

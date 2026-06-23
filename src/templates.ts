@@ -294,7 +294,7 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
         {
           type: 'agent',
           params: {
-            role: 'Autonomous treasury operator',
+            role: 'Treasury operator',
             goal:
               "Check the connected wallet's balance and the current CSPR price, then summarize what you see in one sentence.",
             toolsMode: 'auto',

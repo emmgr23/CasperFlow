@@ -54,6 +54,30 @@ function gasLabel(e: JournalEntry) {
   return null
 }
 
+// Tidy the actor label for display (also fixes older entries): drop the now
+// removed "Autonomous" prefix and keep it short.
+function shortActor(a: string): string {
+  const s = a.replace(/^autonomous\s+/i, '').trim()
+  return s.charAt(0).toUpperCase() + s.slice(1)
+}
+
+// Compact gas for the ledger column: just the net, with the full held/refunded/net
+// breakdown on hover, so the column stays narrow and aligned.
+function gasCompact(e: JournalEntry) {
+  const { gasLimitMotes: limit, gasRefundMotes: refund, gasMotes: cost } = e
+  const netMotes = cost != null ? cost : limit != null && refund != null ? limit - refund : null
+  if (netMotes == null) return ''
+  const tip =
+    limit != null && refund != null
+      ? `held ${cspr(limit)}, refunded ${cspr(refund)}, net ${cspr(netMotes)} CSPR`
+      : `net ${cspr(netMotes)} CSPR`
+  return (
+    <span title={tip}>
+      gas {cspr(netMotes)} CSPR
+    </span>
+  )
+}
+
 const pad = (n: number) => String(n).padStart(2, '0')
 const dateKey = (d: Date) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`
 const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
@@ -136,6 +160,14 @@ export default function JournalView({
       cells.push({ day: d, key: dateKey(new Date(viewY, viewM, d)) })
     return cells
   }, [viewY, viewM])
+
+  // Busiest day of the viewed month, to scale the calendar heat-map (GitHub style):
+  // each day's green intensity is relative to the most active day this month.
+  const monthMax = useMemo(() => {
+    let m = 0
+    for (const c of grid) if (c) m = Math.max(m, byDay[c.key]?.length || 0)
+    return m
+  }, [grid, byDay])
 
   // Years shown in the wheel: the current year plus the next three, so they all
   // fit on one line with no scroll bar (e.g. 2026, 2027, 2028, 2029).
@@ -229,22 +261,31 @@ export default function JournalView({
                   {w}
                 </div>
               ))}
-              {grid.map((c, i) =>
-                c === null ? (
-                  <div key={i} className="journal-cal-blank" />
-                ) : (
+              {grid.map((c, i) => {
+                if (c === null) return <div key={i} className="journal-cal-blank" />
+                const count = byDay[c.key]?.length || 0
+                const isSelected = c.key === selected
+                // Heat intensity relative to the busiest day of the month.
+                const r = count && monthMax ? count / monthMax : 0
+                const alpha = !r ? 0 : r > 0.75 ? 0.55 : r > 0.5 ? 0.4 : r > 0.25 ? 0.27 : 0.15
+                return (
                   <button
                     key={i}
-                    className={`journal-cal-day${c.key === selected ? ' selected' : ''}${
+                    className={`journal-cal-day${isSelected ? ' selected' : ''}${
                       c.key === dateKey(today) ? ' today' : ''
                     }`}
                     onClick={() => setSelected(c.key)}
+                    title={count ? `${count} action${count === 1 ? '' : 's'}` : undefined}
+                    style={
+                      alpha && !isSelected
+                        ? { background: `rgba(52, 211, 153, ${alpha})`, color: '#ecfdf5' }
+                        : undefined
+                    }
                   >
                     {c.day}
-                    {byDay[c.key] && <span className="journal-cal-dot" />}
                   </button>
-                ),
-              )}
+                )
+              })}
             </div>
             <button className="journal-today-btn" onClick={goToday}>
               Today
@@ -329,53 +370,45 @@ export default function JournalView({
               <div className="journal-entries">
                 {filtered.map((e) => (
                   <div key={e.id} className="journal-entry">
-                    <div className="journal-entry-time">
+                    <span className="je-time">
                       {new Date(e.time).toLocaleTimeString('en-GB', {
                         hour: '2-digit',
                         minute: '2-digit',
                       })}
-                    </div>
-                    <div className="journal-kind-col">
+                    </span>
+                    <span className="je-kind">
                       <span className={`journal-kind kind-${e.kind}`}>{e.kind}</span>
-                    </div>
-                    <div className="journal-entry-body">
-                      <div className="journal-entry-title">
-                        <span className="journal-entry-text">{e.title}</span>
-                        <span className={`journal-status js-${e.status}`}>{e.status}</span>
-                      </div>
-                      <div className="journal-entry-meta">
-                        {e.amount != null && (
-                          <span>
-                            {e.amount} CSPR
-                            {usdOf(e.amount, e.usd) && (
-                              <span className="journal-usd"> ({usdOf(e.amount, e.usd)})</span>
-                            )}
-                          </span>
-                        )}
-                        {e.from && (
-                          <span>
-                            from <strong>{e.from}</strong>
-                            {e.to ? (
-                              <>
-                                {' '}to <strong>{e.to}</strong>
-                              </>
-                            ) : null}
-                          </span>
-                        )}
-                        {e.actor && <span className="journal-actor">by {e.actor}</span>}
-                        {gasLabel(e)}
-                        {e.url && (
-                          <a
-                            href={e.url}
-                            target="_blank"
-                            rel="noopener noreferrer"
-                            className="log-link"
-                          >
-                            {shortUrl(e.url)}
-                          </a>
-                        )}
-                      </div>
-                    </div>
+                    </span>
+                    <span className="je-title" title={e.title}>
+                      <span className="journal-entry-text">{e.title}</span>
+                      <span className={`journal-status js-${e.status}`}>{e.status}</span>
+                    </span>
+                    <span className="je-amount">
+                      {e.amount != null ? (
+                        <>
+                          {e.amount} CSPR
+                          {usdOf(e.amount, e.usd) && (
+                            <span className="journal-usd"> ({usdOf(e.amount, e.usd)})</span>
+                          )}
+                        </>
+                      ) : (
+                        ''
+                      )}
+                    </span>
+                    <span className="je-route">
+                      {e.from ? `${e.from}${e.to ? ` → ${e.to}` : ''}` : ''}
+                    </span>
+                    <span className="je-gas">{gasCompact(e)}</span>
+                    <span className="je-link">
+                      {e.url ? (
+                        <a href={e.url} target="_blank" rel="noopener noreferrer" className="log-link">
+                          {shortUrl(e.url)}
+                        </a>
+                      ) : (
+                        ''
+                      )}
+                    </span>
+                    <span className="je-actor">{e.actor ? shortActor(e.actor) : ''}</span>
                   </div>
                 ))}
               </div>

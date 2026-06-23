@@ -717,7 +717,7 @@ export const MODULES: ModuleDef[] = [
     category: 'agent',
     icon: 'sparkles',
     params: [
-      { key: 'role', label: 'Role', type: 'text', default: 'Autonomous treasury operator' },
+      { key: 'role', label: 'Role', type: 'text', default: 'Treasury operator' },
       { key: 'goal', label: 'Goal (plain English)', type: 'text', default: '' },
       // 'auto' = tools inferred from the goal (default, simplest for newcomers).
       // 'manual' = the explicit list in `tools`.

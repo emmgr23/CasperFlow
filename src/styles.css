@@ -827,6 +827,11 @@ body {
   font-size: calc(10.5px * var(--ui-scale, 1)); color: #64748b;
   font-family: 'SF Mono', Menlo, monospace;
 }
+/* Recipient's live on-chain balance, a quiet sanity check under the address. */
+.ndt-balance {
+  margin-top: 2px; font-size: calc(9px * var(--ui-scale, 1));
+  color: rgba(94, 234, 212, 0.5); letter-spacing: 0.2px;
+}
 /* Little label stuck on the top-right corner of the card, poking out slightly. */
 .status-sticker {
   position: absolute;
@@ -1749,31 +1754,35 @@ body {
   font-size: 14px; line-height: 1.65; color: #cbd5e1; white-space: pre-wrap;
 }
 .journal-empty { color: #64748b; font-size: 13.5px; padding: 30px 0; text-align: center; }
-.journal-entries { display: flex; flex-direction: column; gap: 10px; }
+.journal-entries { display: flex; flex-direction: column; gap: 6px; }
+/* One aligned ledger row per entry: every column lines up across all rows,
+   empty cells stay empty so nothing shifts. */
 .journal-entry {
-  display: flex; gap: 14px; padding: 12px 14px;
-  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 12px;
+  display: grid;
+  grid-template-columns:
+    48px 76px minmax(150px, 1fr) 118px 140px 100px 270px 116px;
+  align-items: center; gap: 14px;
+  padding: 9px 14px;
+  background: rgba(255, 255, 255, 0.03); border: 1px solid rgba(255, 255, 255, 0.08); border-radius: 10px;
 }
-.journal-entry-time { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; color: #64748b; flex-shrink: 0; padding-top: 2px; }
-/* Fixed-width column for the kind badge, so the title text and the meta line
-   (amount / from-to / "by …") line up at the same x in every row, with or
-   without an amount. */
-.journal-kind-col { flex-shrink: 0; width: 64px; padding-top: 1px; }
-.journal-entry-body { flex: 1; min-width: 0; }
-.journal-entry-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; font-size: 13.5px; color: #e2e8f0; }
-.journal-entry-text { font-weight: 500; }
+.je-time { font-family: 'SF Mono', Menlo, monospace; font-size: 12px; color: #64748b; }
+.je-kind { min-width: 0; }
+.je-title { display: flex; align-items: center; gap: 8px; min-width: 0; font-size: 13.5px; color: #e2e8f0; }
+.journal-entry-text { font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.je-amount { font-size: 12px; color: #cbd5e1; white-space: nowrap; }
+.je-route { font-size: 12px; color: #94a3b8; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.je-gas { font-size: 12px; color: #94a3b8; white-space: nowrap; }
+.je-link { font-size: 12px; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.je-actor { font-size: 11.5px; color: #64748b; text-align: right; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 .journal-kind {
   font-size: 10.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.3px;
   padding: 1px 7px; border-radius: 999px; color: #93c5fd; background: rgba(96, 165, 250, 0.16);
 }
-.journal-status { font-size: 10.5px; font-weight: 700; padding: 1px 8px; border-radius: 999px; }
+.journal-status { font-size: 10px; font-weight: 700; padding: 1px 7px; border-radius: 999px; flex-shrink: 0; }
 .js-success { color: #86efac; background: rgba(74, 222, 128, 0.15); }
 .js-failed { color: #fca5a5; background: rgba(248, 113, 113, 0.16); }
 .js-pending { color: #fcd34d; background: rgba(250, 204, 21, 0.14); }
 .js-blocked { color: #fdba74; background: rgba(251, 146, 60, 0.16); }
-.journal-entry-meta { display: flex; flex-wrap: wrap; gap: 12px; margin-top: 6px; font-size: 12px; color: #94a3b8; }
-.journal-entry-meta strong { color: #cbd5e1; font-weight: 600; }
-.journal-actor { color: #facc15; }
 .journal-usd { color: #64748b; }
 
 /* Filter bar above the day's entries. */

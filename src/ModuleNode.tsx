@@ -6,6 +6,7 @@ import { aiVarName, agentBadge } from './aiVars'
 import { fetchCsprPrice } from './price'
 import { subscribeRuntime, getLiveSchedule } from './runtime'
 import WalletNodeFront from './WalletNodeFront'
+import RecipientBalance from './RecipientBalance'
 import { boltOnBorder } from './lightning'
 import Icon from './Icon'
 
@@ -199,6 +200,7 @@ export default function ModuleNode({ id, data, selected }: NodeProps) {
                   {isName && <span className="ndt-tag">cspr.name</span>}
                 </div>
                 {addr && <div className="ndt-addr">{shortAddr}</div>}
+                <RecipientBalance to={addr} />
               </div>
             )
           })()
