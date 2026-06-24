@@ -329,6 +329,14 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
   const [agentStatus, setAgentStatus] = useState(
     hasAgentKey() ? `Loaded — agent ${getAgentPublicHex()?.slice(0, 10)}…` : '',
   )
+  const [agentPemRevealed, setAgentPemRevealed] = useState(false)
+  const [agentImporting, setAgentImporting] = useState(false)
+  // Reload a saved agent key into the signer on mount, so it keeps signing (and
+  // shows its public key) after a page refresh — not just in the session it was made.
+  useEffect(() => {
+    if (settings.agentKeyPem.trim() && !hasAgentKey()) setAgentKeyFromPem(settings.agentKeyPem)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const loadAgentKey = () => {
     const r = setAgentKeyFromPem(settings.agentKeyPem)
@@ -353,6 +361,22 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
     setAgentKeyFromPem('')
     set({ agentKeyPem: '' })
     setAgentStatus('Cleared — transactions will use the wallet (popup).')
+  }
+
+  // Download the secret key as a real `.pem` file — for the Odra deploy, or to
+  // import the account into the Casper Wallet (which takes a PEM file upload).
+  const downloadAgentPem = () => {
+    if (!settings.agentKeyPem.trim()) return
+    const blob = new Blob([settings.agentKeyPem], { type: 'application/x-pem-file' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = 'secret_key.pem'
+    document.body.appendChild(a)
+    a.click()
+    a.remove()
+    URL.revokeObjectURL(url)
+    setAgentStatus('Downloaded secret_key.pem — keep it safe, never commit it.')
   }
 
   const checkAgentBalance = async () => {
@@ -901,6 +925,127 @@ export default function SettingsPanel({ settings, onChange, onClose, initialTab,
                 {wStatus && <div className="settings-status">{wStatus}</div>}
               </div>
             )}
+
+            <div className="settings-section">Autonomous agent key</div>
+            <div className="settings-note" style={{ marginTop: 0 }}>
+              A dedicated Casper account your agents sign with on their own — no wallet popup, so
+              automations never block. The key is created and kept in your browser; fund it once at the
+              faucet and your agents act autonomously. You can also reuse it to deploy contracts.
+              ⚠️ Testnet only.
+            </div>
+
+            {settings.agentKeyPem.trim() ? (
+              <div className="agentkey-card">
+                <div className="agentkey-row">
+                  <span className="agentkey-badge"><span className="agentkey-dot" /> Active</span>
+                  <span className="agentkey-label">signs autonomously, no popup</span>
+                </div>
+                <div className="agentkey-field">
+                  <span className="agentkey-pk-label">Public key (fund this at the faucet)</span>
+                  <div className="agentkey-val">
+                    <code>{getAgentPublicHex() || '— load the key —'}</code>
+                    {getAgentPublicHex() && (
+                      <button
+                        className="agentkey-iconbtn"
+                        title="Copy the full public key"
+                        onClick={() => navigator.clipboard?.writeText(getAgentPublicHex() || '')}
+                      >
+                        <Icon name="copy" size={13} />
+                      </button>
+                    )}
+                  </div>
+                </div>
+                <div className="agentkey-actions">
+                  <a
+                    className="btn-secondary settings-test"
+                    href="https://testnet.cspr.live/tools/faucet"
+                    target="_blank"
+                    rel="noreferrer"
+                  >
+                    <Icon name="zap" size={13} /> Fund (faucet)
+                  </a>
+                  <button className="btn-secondary settings-test" onClick={checkAgentBalance}>
+                    Check balance
+                  </button>
+                  <button
+                    className="btn-secondary settings-test"
+                    onClick={() => setAgentPemRevealed((v) => !v)}
+                  >
+                    <Icon name={agentPemRevealed ? 'eye-off' : 'eye'} size={13} />{' '}
+                    {agentPemRevealed ? 'Hide secret' : 'Show secret'}
+                  </button>
+                  <button
+                    className="btn-secondary settings-test"
+                    onClick={() => navigator.clipboard?.writeText(settings.agentKeyPem)}
+                  >
+                    <Icon name="copy" size={13} /> Copy PEM
+                  </button>
+                  <button className="btn-secondary settings-test" onClick={downloadAgentPem}>
+                    <Icon name="download" size={13} /> Download .pem
+                  </button>
+                  <button
+                    className="btn-secondary settings-test agentkey-remove"
+                    onClick={() => {
+                      setAgentPemRevealed(false)
+                      clearAgentKey()
+                    }}
+                  >
+                    <Icon name="trash" size={13} /> Remove
+                  </button>
+                </div>
+                {agentPemRevealed && (
+                  <div className="agentkey-field" style={{ marginTop: 12 }}>
+                    <span className="agentkey-pk-label">Secret key (PEM) — keep this private</span>
+                    <div className="agentkey-val">
+                      <pre className="agentkey-pem">{settings.agentKeyPem}</pre>
+                      <button
+                        className="agentkey-iconbtn"
+                        title="Copy the PEM"
+                        onClick={() => navigator.clipboard?.writeText(settings.agentKeyPem)}
+                      >
+                        <Icon name="copy" size={13} />
+                      </button>
+                    </div>
+                  </div>
+                )}
+                {agentStatus && <div className="settings-status">{agentStatus}</div>}
+              </div>
+            ) : (
+              <>
+                <div className="agentkey-empty">
+                  <button className="btn-primary settings-test" onClick={genAgentKey}>
+                    <Icon name="sparkles" size={13} /> Generate a signing key
+                  </button>
+                  <button
+                    className="btn-secondary settings-test"
+                    onClick={() => setAgentImporting((v) => !v)}
+                  >
+                    Import a key (PEM)
+                  </button>
+                </div>
+                {agentImporting && (
+                  <div className="settings-field" style={{ marginTop: 10 }}>
+                    <label>Paste a Casper secret key (PEM)</label>
+                    <textarea
+                      rows={4}
+                      placeholder="-----BEGIN PRIVATE KEY----- …"
+                      value={settings.agentKeyPem}
+                      onChange={(e) => set({ agentKeyPem: e.target.value })}
+                      style={{ fontFamily: 'ui-monospace, monospace', fontSize: 12, resize: 'vertical' }}
+                    />
+                    <button
+                      className="btn-primary settings-test"
+                      style={{ marginTop: 8 }}
+                      onClick={loadAgentKey}
+                    >
+                      Load key
+                    </button>
+                  </div>
+                )}
+                {agentStatus && <div className="settings-status">{agentStatus}</div>}
+              </>
+            )}
+
             <div className="settings-note">
               Wallets appear in every <b>Wallet</b> action’s dropdown on the canvas. A recovery phrase
               is auto-matched to your real account (ed25519 or secp256k1). ⚠️ Testnet only — keys stay

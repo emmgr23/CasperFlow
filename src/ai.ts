@@ -160,7 +160,7 @@ const BUILDER_GUIDE =
   '- "ask the AI / decide / judge / is it safe" → ai\n' +
   '- "prove / attest / anchor / record the decision on-chain / tamper-proof" → attest\n' +
   '- "receipt / proof of payment" → receipt\n' +
-  '- "stake / delegate" → stake; "swap / trade X for Y" → swap; "deploy a token" → deploytoken; "deploy an NFT collection" → deploynft; "mint an NFT" → mintnft\n' +
+  '- "stake / delegate" → stake; "swap / trade X for Y" → swap\n' +
   '- "every N seconds/minutes/hours/days" → schedule (Repeat every; "every day"/"daily" → interval 1, unit days); "in N seconds/minutes" → schedule (Once after); "when price drops/rises" → price; "when I receive a transfer" → incoming\n\n' +
   'VARIABLES: results are exposed as {{variables}} you may drop into text params (message, data, title, content). ' +
   'Use ONLY these exact names — NEVER invent new ones:\n' +

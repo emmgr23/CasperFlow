@@ -190,9 +190,6 @@ export const MODULE_STATUS: Record<string, ModuleStatus> = {
   attest: 'live', // real EIP-712 attestation anchored on testnet
   // ── Beta: partial / best-effort ──
   swap: 'beta',
-  deploytoken: 'beta', // no-code CEP-18 token deploy (needs the compiled wasm in /public)
-  deploynft: 'beta', // no-code CEP-78 NFT collection deploy (needs cep78.wasm in /public)
-  mintnft: 'beta', // mint into a deployed CEP-78 collection
   quote: 'live', // real on-chain DEX rate read (CSPR.cloud)
   x402: 'live', // real pay-per-call: 402 → pay on Casper → server verifies on-chain → resource
   x402sell: 'live', // monetize: publish an agent's output as a paid x402 listing
@@ -1493,104 +1490,6 @@ export const MODULES: ModuleDef[] = [
     },
   },
   {
-    type: 'deploytoken',
-    label: 'Deploy token (CEP-18)',
-    category: 'contracts',
-    icon: 'coin',
-    params: [
-      { key: 'name', label: 'Token name', type: 'text', default: 'My Token' },
-      { key: 'symbol', label: 'Symbol', type: 'text', default: 'MYT' },
-      { key: 'decimals', label: 'Decimals', type: 'number', default: 9 },
-      { key: 'supply', label: 'Total supply', type: 'number', default: 1000000 },
-      {
-        key: 'mintable',
-        label: 'Supply',
-        type: 'select',
-        options: ['Fixed forever', 'Mintable / burnable'],
-        default: 'Fixed forever',
-      },
-      {
-        key: 'events',
-        label: 'On-chain events',
-        type: 'select',
-        options: ['On (CES)', 'Off'],
-        default: 'On (CES)',
-      },
-      { key: 'payment', label: 'Deploy gas', type: 'number', default: 200, suffix: 'CSPR', advanced: true },
-    ],
-    describe: (p) => `Deploy ${p.symbol} token (CEP-18)`,
-    simulate: (p) => {
-      const mint = String(p.mintable || '').startsWith('Mint') ? 'mintable/burnable' : 'fixed supply'
-      return {
-        output: `Would deploy a CEP-18 token "${p.name}" (${p.symbol}, ${p.decimals} decimals, supply ${p.supply}, ${mint}) on Casper (simulated — connect a Wallet, enable live execution, and add the CEP-18 wasm to /public for a real deploy)`,
-        vars: { symbol: String(p.symbol) },
-      }
-    },
-  },
-  {
-    type: 'deploynft',
-    label: 'Deploy NFT collection (CEP-78)',
-    category: 'contracts',
-    icon: 'image',
-    params: [
-      { key: 'name', label: 'Collection name', type: 'text', default: 'My Collection' },
-      { key: 'symbol', label: 'Symbol', type: 'text', default: 'MYNFT' },
-      { key: 'supply', label: 'Max NFTs', type: 'number', default: 1000 },
-      {
-        key: 'ownership',
-        label: 'Ownership',
-        type: 'select',
-        options: ['Transferable', 'Soulbound (non-transferable)', 'Minter-owned'],
-        default: 'Transferable',
-      },
-      {
-        key: 'minting',
-        label: 'Who can mint',
-        type: 'select',
-        options: ['Only me (installer)', 'Public'],
-        default: 'Only me (installer)',
-      },
-      {
-        key: 'metadata',
-        label: 'Metadata',
-        type: 'select',
-        options: ['Immutable', 'Mutable'],
-        default: 'Immutable',
-      },
-      {
-        key: 'burnable',
-        label: 'Burnable',
-        type: 'select',
-        options: ['Yes', 'No'],
-        default: 'Yes',
-      },
-      { key: 'payment', label: 'Deploy gas', type: 'number', default: 250, suffix: 'CSPR', advanced: true },
-    ],
-    describe: (p) => `Deploy ${p.symbol} NFT collection (CEP-78)`,
-    simulate: (p) => ({
-      output: `Would deploy a CEP-78 collection "${p.name}" (${p.symbol}, max ${p.supply}, ${String(p.ownership).toLowerCase()}, ${String(p.minting).toLowerCase()} minting, ${String(p.metadata).toLowerCase()} metadata, burnable: ${p.burnable}) on Casper (simulated — connect a Wallet, enable live execution, and add the CEP-78 wasm to /public for a real deploy)`,
-      vars: { symbol: String(p.symbol) },
-    }),
-  },
-  {
-    type: 'mintnft',
-    label: 'Mint NFT',
-    category: 'contracts',
-    icon: 'image',
-    params: [
-      { key: 'collection', label: 'Collection contract hash', type: 'text', default: '{{collection}}' },
-      { key: 'name', label: 'NFT name', type: 'text', default: 'My NFT #1' },
-      { key: 'image', label: 'Image URL', type: 'text', default: 'https://…' },
-      { key: 'owner', label: 'Mint to (public key, blank = me)', type: 'text', default: '', advanced: true },
-      { key: 'payment', label: 'Mint gas', type: 'number', default: 5, suffix: 'CSPR', advanced: true },
-    ],
-    describe: (p) => `Mint "${trunc(String(p.name), 18)}"`,
-    simulate: (p) => ({
-      output: `Would mint NFT "${p.name}" (image ${trunc(String(p.image), 30)}) into ${trunc(String(p.collection), 16)} on Casper (simulated — connect a Wallet + enable live execution to mint for real)`,
-      vars: { nftname: String(p.name) },
-    }),
-  },
-  {
     type: 'transfer',
     label: 'Send CSPR',
     category: 'payments',
@@ -1699,25 +1598,6 @@ export const MODULES: ModuleDef[] = [
     simulate: (p) => ({
       output: `Bridging ${p.amount} CSPR → ${p.toChain} (${String(p.recipient).slice(0, 8)}…) via ${p.provider ?? 'Ferrum'}: locked on Casper, minted on destination (cross-chain, simulated)`,
       vars: { amount: Number(p.amount), chain: String(p.toChain) },
-    }),
-  },
-  {
-    type: 'deploy',
-    label: 'Deploy contract',
-    category: 'contracts',
-    icon: 'file-code',
-    params: [
-      {
-        key: 'template',
-        label: 'Odra template',
-        type: 'select',
-        options: ['Token (CEP-18)', 'Tipping contract', 'Escrow'],
-        default: 'Token (CEP-18)',
-      },
-    ],
-    describe: (p) => `Odra: ${p.template}`,
-    simulate: (p) => ({
-      output: `Odra build "${p.template}" → tests 4/4 passed → deployed to testnet (simulated)`,
     }),
   },
   {

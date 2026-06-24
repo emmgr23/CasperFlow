@@ -1,8 +1,6 @@
 # CasperFlow — Demo scenarios (film tomorrow)
 
-Five short demos. Each is self-contained (~45–90s). Record in this order; the
-first two need **no extra setup**, the contract ones need the WASM dropped in
-`/public` (see `SMART_CONTRACTS.md`).
+Short demos. Each is self-contained (~45–90s). None need extra setup.
 
 Global prep (once, before filming):
 - Settings → Integrations → Casper: **testnet**, paste the CSPR.cloud key.
@@ -77,48 +75,6 @@ Steps to film — two takes:
    Branch stops.` Notify never fires. One sentence: "Paid, but the junk response
    is rejected and nothing downstream consumes it — escrow/refund is the next
    step."
-
----
-
-## Demo 4 — Token launchpad (CEP-18), no Rust (NEEDS `public/cep18.wasm`)
-
-**Story:** issue a real token from a canvas, picking behaviour from dropdowns.
-
-Flow: template **★ Token Launchpad (CEP-18)** (`Wallet → Deploy token → Notify`).
-
-Steps to film:
-1. Open the Deploy token card. Show the dropdowns: name/symbol/decimals/supply,
-   **Supply = Mintable / burnable**, **On-chain events = On (CES)**.
-2. Run once → `Deploying CEP-18 token "Demo Token" (DEMO)…` →
-   `✓ REAL token deploy submitted — <hash>` → `View:` link.
-3. Open the link → show the deploy **Success** on cspr.live.
-4. One sentence: "A real CEP-18 token on Casper, no Rust, no compiler — you just
-   chose what it does."
-
-If the wasm isn't in `/public`, the node says exactly that — drop the file and
-re-run (don't film the simulation line).
-
----
-
-## Demo 5 — NFT launchpad (CEP-78), the "semi-automatic contract" (NEEDS `public/cep78.wasm`)
-
-**Story:** the headline idea — a configurable contract. CEP-78 is *modal* by
-design, so the dropdowns ARE the contract's behaviour.
-
-Flow: template **★ NFT Launchpad (CEP-78)** (`Wallet → Deploy NFT collection →
-Notify`). Optionally add a **Mint NFT** node after it (its collection field reads
-`{{collection}}`; for the first cut you can paste the deployed hash).
-
-Steps to film:
-1. Open the Deploy NFT card. Slowly show each dropdown and say what it changes:
-   **Ownership** (Transferable / Soulbound), **Who can mint**, **Metadata**
-   (Immutable / Mutable), **Burnable**. "Same contract, five different behaviours
-   — chosen here, not in Rust."
-2. Run once → `✓ REAL NFT collection deploy submitted — <hash>` → open on
-   cspr.live (Success).
-3. (Optional) Mint NFT → `✓ REAL NFT mint submitted`.
-4. One sentence: "A configurable smart contract, deployed no-code — more than a
-   template, without writing a line of Rust."
 
 ---
 

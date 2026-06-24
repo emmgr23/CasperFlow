@@ -1598,6 +1598,50 @@ body {
   color: #94a3b8; transition: background 0.15s, color 0.15s;
 }
 .ai-profile-key-copy:hover { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; }
+
+/* Autonomous agent key — a clean card instead of a raw textarea. */
+.agentkey-card {
+  margin-top: 12px; padding: 14px; max-width: 560px;
+  background: rgba(255, 255, 255, 0.03);
+  border: 1px solid rgba(255, 255, 255, 0.1); border-radius: 12px;
+}
+.agentkey-row { display: flex; align-items: center; gap: 10px; margin-bottom: 12px; }
+.agentkey-badge {
+  display: inline-flex; align-items: center; gap: 6px;
+  font-size: 11.5px; font-weight: 700; color: #86efac;
+  background: rgba(74, 222, 128, 0.14); border-radius: 999px; padding: 3px 10px;
+}
+.agentkey-dot { width: 7px; height: 7px; border-radius: 50%; background: #4ade80; box-shadow: 0 0 8px #4ade80; }
+.agentkey-label { font-size: 12px; color: #94a3b8; }
+.agentkey-field { display: flex; flex-direction: column; gap: 6px; margin-bottom: 12px; }
+.agentkey-pk-label { font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.6px; color: #64748b; }
+.agentkey-val { display: flex; align-items: flex-start; gap: 8px; }
+.agentkey-val code, .agentkey-val .agentkey-pem {
+  flex: 1; min-width: 0; margin: 0;
+  font-family: ui-monospace, monospace; font-size: 12px; color: #cbd5e1;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px; padding: 7px 9px; word-break: break-all; user-select: all;
+  white-space: pre-wrap;
+}
+.agentkey-iconbtn {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: 26px; height: 26px; border-radius: 7px; cursor: pointer;
+  background: rgba(148, 163, 184, 0.1); border: 1px solid rgba(148, 163, 184, 0.3); color: #94a3b8;
+  transition: background 0.15s, color 0.15s;
+}
+.agentkey-iconbtn:hover { background: rgba(148, 163, 184, 0.2); color: #e2e8f0; }
+.agentkey-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.agentkey-actions .settings-test { white-space: nowrap; text-decoration: none; }
+.agentkey-remove { color: #fca5a5 !important; border-color: rgba(248, 113, 113, 0.3) !important; }
+.agentkey-remove:hover { background: rgba(248, 113, 113, 0.12) !important; }
+.agentkey-pem {
+  margin: 12px 0 0; padding: 10px 12px; max-width: 100%;
+  background: rgba(255, 255, 255, 0.05); border: 1px solid rgba(255, 255, 255, 0.12); border-radius: 9px;
+  font-family: ui-monospace, monospace; font-size: 11.5px; color: #cbd5e1;
+  white-space: pre-wrap; word-break: break-all; user-select: all;
+}
+.agentkey-empty { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+
 .ai-profile-save { display: flex; gap: 8px; align-items: stretch; max-width: 560px; }
 .ai-profile-save input {
   flex: 1; font-size: 13.5px; padding: 9px 11px;

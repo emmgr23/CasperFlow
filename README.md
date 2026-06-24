@@ -51,8 +51,6 @@ Everything below runs for real on Casper testnet. Nothing is a mockup.
 | **Alerts** | Telegram and Discord messages carrying the on-chain proof link |
 | **MCP server** | Published on npm as `casperflow-mcp`, exposes Casper actions to any MCP client |
 
-**Beta (in validation on testnet):** no-code contract deployment. Install a real CEP-18 token (fixed or mintable/burnable, with or without on-chain events) or a CEP-78 NFT collection, choosing ownership, who can mint, mutable metadata, and burnability from dropdowns, then mint NFTs, with no Rust.
-
 ## The flagship: Treasury Guardian
 
 A recurring payroll agent for a DAO treasury, built from a single sentence and run live on testnet:
@@ -199,12 +197,10 @@ Low, predictable fees and fast deterministic finality make it practical to run s
 
 ## Tech stack
 
-React 18, TypeScript, and Vite; React Flow (`@xyflow/react`) for the canvas; `casper-js-sdk` v5 for real `TransactionV1` signing and submission; CSPR.cloud REST for on-chain reads; `@casper-ecosystem/casper-eip-712` for attestations and x402; standard CEP-18 and CEP-78 contracts configured through their install arguments; a zero-dependency Node server for the x402 demo; an Odra escrow contract for x402 conditional payments.
+React 18, TypeScript, and Vite; React Flow (`@xyflow/react`) for the canvas; `casper-js-sdk` v5 for real `TransactionV1` signing and submission; CSPR.cloud REST for on-chain reads; `@casper-ecosystem/casper-eip-712` for attestations and x402; a zero-dependency Node server for the x402 demo.
 
 ## Roadmap
 
-- No-code contracts live on testnet: deploy and mint CEP-18 tokens and CEP-78 NFT collections for real
-- x402 conditional escrow (Odra): pay, verify, then release or refund
 - Full x402 loop: pay (done), earn (done), and a pay-per-call MCP server
 - A live x402 marketplace demo between two agents
 - CSPR.trade swaps from beta to live, so agents can trade on their own

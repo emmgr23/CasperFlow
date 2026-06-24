@@ -37,7 +37,7 @@ import ConsolePanel from './ConsolePanel'
 import HelpHints from './HelpHints'
 import NodeConfig from './NodeConfig'
 import { isWalletInstalled, connectWallet, disconnectWallet, reconnectIfConnected, onWalletEvents } from './wallet'
-import { sendCsprReal, delegateReal, callContractReal, deployTokenReal, deployNftReal, mintNftReal, awaitExecution, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
+import { sendCsprReal, delegateReal, callContractReal, awaitExecution, explorerTxUrl, hasAgentKey, getAgentPublicHex, getAgentKey, setAgentKeyFromPem, setActiveSigner } from './tx'
 import { payX402OnChain } from './x402'
 import { swapReal } from './swap'
 import { deriveKey, loadWalletProfiles, type WalletFormat, type WalletAlgo, type WalletProfile } from './wallets'
@@ -1704,7 +1704,7 @@ function Flow() {
   // Actions that DO something on-chain (vs. read/monitor steps). Used to tell a
   // "doer" agent (payroll, DCA) from a pure monitor, for the live auto-stop below.
   const DOER_TYPES = new Set([
-    'transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft',
+    'transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap',
   ])
 
   // Returns true if the cycle "made progress": a monitor (no doer actions) always
@@ -1787,7 +1787,7 @@ function Flow() {
     const totalSignable = currentNodes.filter(
       (n) =>
         n.type === 'module' &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes((n.data as ModuleNodeData).moduleType),
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes((n.data as ModuleNodeData).moduleType),
     ).length
     let approvalSeq = 0
 
@@ -2008,7 +2008,7 @@ function Flow() {
       // 1) Use the Wallet node connected UPSTREAM to this signable action.
       if (
         settingsRef.current.liveExecution &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft', 'agent'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'agent'].includes(data.moduleType)
       ) {
         const wnode = findUpstreamWallet(id, currentNodes, currentEdges)
         if (wnode) {
@@ -2064,7 +2064,7 @@ function Flow() {
       if (
         settingsRef.current.liveExecution &&
         !signerHex &&
-        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)
+        ['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)
       ) {
         appendLog(
           `${def.label}: no Wallet connected — connect a Wallet node before this action. Nothing was sent.`,
@@ -2442,124 +2442,6 @@ function Flow() {
               if (r.hash) await confirmTx('Swap', r.hash)
             } else {
               appendLog(`Swap failed: ${r.error}`, 'warn')
-              branchStops = true
-              txFailed = true
-            }
-          }
-        } else if (data.moduleType === 'deploytoken') {
-          const deployGas = Number(params.payment) || 200
-          if (!enforceSpend(deployGas, 'Token deploy gas')) {
-            /* blocked by spend limit — skip */
-          } else if (await confirmIfNeeded('Deploy token', `${params.symbol} (CEP-18)`)) {
-            appendLog(`Deploying CEP-18 token "${params.name}" (${params.symbol})…`, 'info')
-            const decimals = Number(params.decimals) || 0
-            const baseSupply = (
-              BigInt(Math.round(Number(params.supply) || 0)) *
-              10n ** BigInt(decimals)
-            ).toString()
-            const r = await deployTokenReal({
-              net,
-              senderHex: signerHex,
-              name: String(params.name),
-              symbol: String(params.symbol),
-              decimals,
-              totalSupply: baseSupply,
-              enableMintBurn: String(params.mintable || '').startsWith('Mint'),
-              emitEvents: !String(params.events || '').startsWith('Off'),
-              paymentCspr: Number(params.payment) || 200,
-            })
-            if (r.ok) {
-              recordSpend(deployGas)
-              const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`REAL token deploy submitted — ${r.hash}`, 'info')
-              appendLog(`View: ${url}`, 'info')
-              bag.txurl = url
-              bag.hash = r.hash || ''
-              bag.symbol = String(params.symbol)
-              if (r.hash) await confirmTx('Token deploy', r.hash)
-              if (walletKey) refreshWalletBalance(walletKey)
-            } else {
-              appendLog(`Token deploy failed: ${r.error}`, 'warn')
-              branchStops = true
-              txFailed = true
-            }
-          }
-        } else if (data.moduleType === 'deploynft') {
-          const nftGas = Number(params.payment) || 250
-          const ownership =
-            String(params.ownership).startsWith('Soulbound') ? 1
-            : String(params.ownership).startsWith('Minter') ? 0
-            : 2
-          const minting = String(params.minting).startsWith('Public') ? 1 : 0
-          const metaMut = String(params.metadata).startsWith('Mutable') ? 1 : 0
-          const burn = String(params.burnable).startsWith('No') ? 1 : 0
-          if (!enforceSpend(nftGas, 'NFT collection deploy gas')) {
-            /* blocked by spend limit — skip */
-          } else if (await confirmIfNeeded('Deploy NFT collection', `${params.symbol} (CEP-78)`)) {
-            appendLog(`Deploying CEP-78 collection "${params.name}" (${params.symbol})…`, 'info')
-            const r = await deployNftReal({
-              net,
-              senderHex: signerHex,
-              name: String(params.name),
-              symbol: String(params.symbol),
-              totalSupply: Number(params.supply) || 1000,
-              ownershipMode: ownership,
-              mintingMode: minting,
-              metadataMutability: metaMut,
-              burnMode: burn,
-              allowMinting: true,
-              paymentCspr: nftGas,
-            })
-            if (r.ok) {
-              recordSpend(nftGas)
-              const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`REAL NFT collection deploy submitted — ${r.hash}`, 'info')
-              appendLog(`View: ${url}`, 'info')
-              bag.txurl = url
-              bag.hash = r.hash || ''
-              bag.symbol = String(params.symbol)
-              if (r.hash) await confirmTx('NFT collection deploy', r.hash)
-              if (walletKey) refreshWalletBalance(walletKey)
-            } else {
-              appendLog(`NFT deploy failed: ${r.error}`, 'warn')
-              branchStops = true
-              txFailed = true
-            }
-          }
-        } else if (data.moduleType === 'mintnft') {
-          const mintGas = Number(params.payment) || 5
-          const collection = String(params.collection).trim()
-          if (!collection || collection.includes('{{')) {
-            appendLog('Mint NFT (LIVE): set the collection contract hash (deploy a collection first) — skipped.', 'warn')
-          } else if (!enforceSpend(mintGas, 'NFT mint gas')) {
-            /* blocked by spend limit — skip */
-          } else if (await confirmIfNeeded('Mint NFT', `${params.name} → ${collection.slice(0, 10)}…`)) {
-            appendLog(`Minting NFT "${params.name}"…`, 'info')
-            const metadataJson = JSON.stringify({
-              name: String(params.name),
-              token_uri: String(params.image || ''),
-              checksum: '0'.repeat(64),
-            })
-            const r = await mintNftReal({
-              net,
-              senderHex: signerHex,
-              contractHash: collection,
-              ownerHex: String(params.owner || '').trim(),
-              metadataJson,
-              paymentCspr: mintGas,
-            })
-            if (r.ok) {
-              recordSpend(mintGas)
-              const url = explorerTxUrl(net, r.hash || '')
-              appendLog(`REAL NFT mint submitted — ${r.hash}`, 'info')
-              appendLog(`View: ${url}`, 'info')
-              bag.txurl = url
-              bag.hash = r.hash || ''
-              bag.nftname = String(params.name)
-              if (r.hash) await confirmTx('NFT mint', r.hash)
-              if (walletKey) refreshWalletBalance(walletKey)
-            } else {
-              appendLog(`NFT mint failed: ${r.error}`, 'warn')
               branchStops = true
               txFailed = true
             }
@@ -3238,7 +3120,7 @@ function Flow() {
       }
 
       // If an on-chain action falls through to simulation, say loudly why.
-      if (['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap', 'deploytoken', 'deploynft', 'mintnft'].includes(data.moduleType)) {
+      if (['transfer', 'stake', 'callcontract', 'attest', 'x402', 'swap'].includes(data.moduleType)) {
         const why = !settingsRef.current.liveExecution
           ? 'turn ON “Execute real transactions” (Settings → Integrations → Casper)'
           : !hasAgentKey() && !walletKey

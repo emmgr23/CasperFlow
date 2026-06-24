@@ -426,12 +426,6 @@ export const WIKI: WikiSection[] = [
           'Pays a paid API endpoint per request via Casper’s x402 micropayment protocol — the agent economy in action. The flow is the real x402 handshake: the agent calls the endpoint; if it returns HTTP 402 with payment requirements, the agent signs an EIP-712 TransferAuthorization (EIP-3009 style) with its Wallet key, replays the request with the payment header, the facilitator settles a CEP-18 transfer on Casper, and the protected data returns. If the endpoint is free (HTTP 200) it just returns the data, no payment.\n\nHow to use: connect a Wallet (Autonomous) before the x402 action, set the endpoint URL and your max price, and turn on real execution. The EIP-712 signing uses Casper’s official @casper-ecosystem/casper-eip-712 standard, so authorizations are exactly what the facilitator expects.\n\nStatus: BETA. The 402 handshake and EIP-712 signing follow the official Casper x402 spec (make-software/casper-x402). To run end-to-end you point it at a live x402 facilitator + paid endpoint — free on testnet by running the project’s Go demo locally, or any hosted testnet facilitator. The exact payment-payload wire format may need a small tweak once validated against a running facilitator. Casper recently joined the x402 Foundation, so expect this to mature fast.\n\nFirst-time setup: run npm install (a new dependency, @casper-ecosystem/casper-eip-712, was added).',
         keywords: ['x402', 'micropayment', 'pay per request', 'api', 'machine', 'http 402', 'eip-712', 'eip-3009', 'facilitator', 'cep-18', 'transferauthorization', 'agentic', 'foundation'],
       },
-      {
-        id: 'deploy',
-        title: 'Deploy contract',
-        body: 'Generates and deploys a smart contract from an Odra template (token, tipping, escrow) — the agent writes and ships a contract without a human. Currently simulated.',
-        keywords: ['deploy', 'contract', 'odra', 'smart contract', 'token', 'escrow'],
-      },
     ],
   },
   {
