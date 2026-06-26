@@ -2646,7 +2646,18 @@ function Flow() {
                   }
                   const amt = Number(args.amount)
                   if (!(amt > 0)) return 'Refused: amount must be a positive number of CSPR.'
-                  if (!isKey(to) && !isHash(to)) return `Refused: "${String(args.to)}" is not a valid recipient.`
+                  if (!isKey(to) && !isHash(to)) {
+                    const raw = String(args.to || '').trim()
+                    const looksPlaceholder =
+                      !raw ||
+                      /[<>{}]/.test(raw) ||
+                      /^(recipient|address|destination|payee|placeholder|tbd|x{3,}|your[ _-]?(recipient|address|wallet))$/i.test(raw)
+                    if (looksPlaceholder) {
+                      signingLocked = true
+                      return `Refused: NO destination address was provided — "${raw}" is a placeholder, not a real recipient. Tell the user clearly that they must set a real recipient (a Casper public key starting 01/02, or a saved wallet name) before the agent can send. Signing is now locked for this run: do not send and do not attest any transfer. Stop and report this.`
+                    }
+                    return `Refused: "${raw}" is not a valid recipient. Use a Casper public key (01…/02…) or a saved wallet name.`
+                  }
                   if (completedActions.has(`send:${to.toLowerCase()}:${amt}`))
                     return 'Already sent this exact transfer this run. Do NOT send it again; stop.'
                   // Casper rejects native transfers below 2.5 CSPR. Catch it here,
@@ -2797,6 +2808,22 @@ function Flow() {
                 }
                 if (name === 'attest') {
                   const note = String(args.note || '').slice(0, 400)
+                  // Truth guard: never anchor a note that claims funds were moved when
+                  // no transfer actually succeeded this run. Stops the model from
+                  // hallucinating a "Sent X CSPR" attestation after a refused/failed send.
+                  {
+                    const lower = note.toLowerCase()
+                    const claimsMoved =
+                      /\b(sent|send|paid|pay|transferred|transfer|delegated|delegate|released|moved)\b/.test(lower)
+                    const negated =
+                      /\b(no|not|without|unable|never|nothing|none|refuse|refused|skip|skipped|fail|failed|cannot)\b/.test(lower) ||
+                      /n't/.test(lower)
+                    const movedFunds = [...completedActions].some(
+                      (a) => a.startsWith('send:') || a.startsWith('delegate:'),
+                    )
+                    if (claimsMoved && !negated && !movedFunds)
+                      return 'Refused: you are about to anchor a note claiming funds were moved, but NO transfer succeeded this run. Attest only what actually happened (e.g. that no funds were moved and why), or skip the attestation. Do not claim a transfer that did not execute.'
+                  }
                   if (completedActions.has(`attest:${note}`))
                     return 'Already anchored this exact note on Casper this run. Do NOT attest it again; stop.'
                   const att = buildAttestation(`agent:${note}`, signerHex)

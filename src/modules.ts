@@ -329,7 +329,7 @@ export const MODULES: ModuleDef[] = [
     // Brings an external (off-chain) value into the flow as a variable, so later
     // steps can act on real-world data. The data oracle, distinct from the Agent
     // Council (which is a decision oracle).
-    type: 'oracle',
+    type: 'oracledata',
     label: 'Oracle (external data)',
     category: 'trigger',
     icon: 'link',
