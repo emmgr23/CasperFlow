@@ -495,6 +495,56 @@ export const AGENT_TEMPLATES: AgentTemplate[] = [
         { type: 'notify', params: { message: 'Signal bought within budget · receipt {{hash}}' } },
       ]),
   },
+  {
+    id: 'agent-marketplace',
+    name: '★ Agent Marketplace (x402)',
+    icon: 'broadcast',
+    tagline: 'One agent sells, another buys — on Casper',
+    description:
+      'The machine economy in one canvas. A seller agent lists a CSPR market signal for sale via x402; a buyer agent calls the listing, pays for it on Casper with a real CSPR transfer, receives the signal, decides what to do, and anchors the trade on-chain. Two agents, one paid x402 handshake, settled and proven on Casper. Setup: start the x402 server (see x402-server/README) with a SELLER wallet you control as PAY_TO, and run the buyer with a DIFFERENT wallet (Casper rejects self-transfers).',
+    build: () =>
+      buildChain([
+        // Seller lane: publish a priced signal to the x402 server.
+        { type: 'schedule', params: { repeat: 'Repeat every', interval: 5, unit: 'minutes' } },
+        {
+          type: 'x402sell',
+          params: {
+            endpoint: 'http://localhost:4021/publish',
+            content: 'CSPR market signal — BUY · confidence 0.82 · momentum positive',
+            price: 2.5,
+          },
+        },
+        // Buyer lane forks here: it pays for the signal and acts on it.
+        { type: 'wallet', params: { mode: 'autonomous' }, branch: 1 },
+        { type: 'spendlimit', params: { max: 10, window: 'Day' }, branch: 1 },
+        {
+          type: 'x402',
+          params: { endpoint: 'http://localhost:4021/premium', maxPrice: 3, minLength: 8 },
+          branch: 1,
+        },
+        {
+          type: 'ai',
+          params: {
+            instruction:
+              'You are a trader agent. You just paid for and received this signal: {{x402body}}. In one sentence, state whether you act on it and why.',
+          },
+          branch: 1,
+        },
+        {
+          type: 'attest',
+          params: { topic: 'agent-trade', data: 'Paid {{x402amount}} CSPR for an x402 signal; decision: {{ai}}' },
+          branch: 1,
+        },
+        {
+          type: 'notify',
+          params: {
+            message:
+              'Agent marketplace · paid {{x402amount}} CSPR for a signal, decided and anchored on Casper · proof {{txurl}}',
+          },
+          branch: 1,
+        },
+      ]),
+  },
 
   // ── Showcase templates — rich, branching agents made for screenshots ──
   {
