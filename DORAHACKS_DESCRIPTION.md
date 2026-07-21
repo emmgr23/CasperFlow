@@ -1,6 +1,6 @@
 CasperFlow, build autonomous AI agents on Casper, no code
 Describe what you want in plain English. Get an agent that reads on-chain data, decides with AI, and signs real Casper transactions on its own.
-[🎬 Demo video](https://youtu.be/hexnF7Gd9lw) · [💻 GitHub](https://github.com/emmgr23/CasperFlow) · [📦 MCP server (npm)](https://www.npmjs.com/package/casperflow-mcp)
+[🌐 Live app](https://casper-flow-dun.vercel.app) · [🎬 Demo video](https://youtu.be/hexnF7Gd9lw) · [💻 GitHub](https://github.com/emmgr23/CasperFlow) · [📦 MCP server (npm)](https://www.npmjs.com/package/casperflow-mcp)
 CasperFlow is a no-code visual builder for autonomous AI agents on Casper. You drag blocks onto a canvas and connect them, or just describe what you want in one sentence and an AI assembles the flow for you. The result is an agent that reads live on-chain data, decides with an LLM, and signs real Casper transactions by itself. No Rust, no terminal. And every on-chain action is also published as an MCP server, so other AI tools can call the same Casper actions.
 The problem
 Building an autonomous agent on Casper today means writing Rust, deploying contracts, and living in a terminal. That leaves out the people who actually have the ideas, treasurers, operators, founders, analysts. CasperFlow removes that barrier: if you can describe the job, you can ship the agent.
