@@ -208,9 +208,17 @@ React 18, TypeScript, and Vite; React Flow (`@xyflow/react`) for the canvas; `ca
 - On-chain attestation registry (Odra) so proofs are easy to query
 - A one-click template library
 
+## Testing
+
+Step-by-step instructions to run and verify the MVP on Casper testnet are in [TESTING.md](./TESTING.md). Real sample transactions, with descriptions and explorer links, are listed in [TESTNET_TRANSACTIONS.md](./TESTNET_TRANSACTIONS.md).
+
+## Contributing
+
+Contributions are welcome — please read [CONTRIBUTING.md](./CONTRIBUTING.md) and the [Code of Conduct](./CODE_OF_CONDUCT.md). CI runs type-check, build, and CodeQL security analysis on every pull request.
+
 ## Security
 
-This is hackathon and research software. Use testnet only. Wallet keys are stored unencrypted in browser localStorage and used for local signing. Do not use with real funds. AI keys and the CSPR.cloud key live in your browser and in environment variables for the servers; nothing sensitive is committed to this repository.
+This is hackathon and research software. Use testnet only. Wallet keys are stored unencrypted in browser localStorage and used for local signing. Do not use with real funds. AI keys and the CSPR.cloud key live in your browser and in environment variables for the servers; nothing sensitive is committed to this repository. To report a vulnerability, follow [SECURITY.md](./SECURITY.md).
 
 ## License
 

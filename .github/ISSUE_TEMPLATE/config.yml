@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Casper Developers (Telegram)
+    url: https://t.me/CSPRDevelopers
+    about: Ask questions and chat with Casper developers.
+  - name: Casper Network (Discord)
+    url: https://discord.com/invite/caspernetwork
+    about: Join the Casper community on Discord.
+  - name: Security vulnerability
+    url: https://github.com/emmgr23/CasperFlow/security/advisories/new
+    about: Please report security issues privately, not as public issues.
