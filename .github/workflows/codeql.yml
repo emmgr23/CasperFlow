@@ -30,7 +30,9 @@ jobs:
         uses: github/codeql-action/init@v3
         with:
           languages: ${{ matrix.language }}
-          queries: security-and-quality
+          # Security-focused query suite (drops non-security "quality" notes such
+          # as unused variables so the alerts list stays security-relevant).
+          queries: security-extended
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3

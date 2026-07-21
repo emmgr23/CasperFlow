@@ -150,7 +150,10 @@ const server = http.createServer(async (req, res) => {
     }
     const payload = b64decode(Array.isArray(header) ? header[0] : header)
     const txHash = payload?.payload?.transaction || payload?.payload?.txHash || payload?.transaction || ''
-    console.log(`→ payment presented, verifying tx ${String(txHash).slice(0, 16)}… on-chain`)
+    // Sanitize before logging: a tx hash is hex only, so strip anything else
+    // (e.g. newlines) to avoid log injection from the client-supplied header.
+    const txHashSafe = String(txHash).replace(/[^a-fA-F0-9]/g, '').slice(0, 16)
+    console.log(`→ payment presented, verifying tx ${txHashSafe}… on-chain`)
     const ok = await verifyOnChain(txHash)
     if (!ok) {
       console.log('✗ payment NOT verified on-chain')
