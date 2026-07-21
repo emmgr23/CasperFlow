@@ -1,29 +1,9 @@
 version: 2
+# Security updates for npm are handled by the repository's
+# "Dependabot security updates" setting (driven by Dependabot alerts), so we do
+# not enable broad npm version-update PRs here to keep the PR queue clean.
+# We only keep GitHub Actions version updates, which are low-noise.
 updates:
-  # JavaScript / TypeScript dependencies (frontend + MCP server).
-  - package-ecosystem: npm
-    directory: "/"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 10
-    labels:
-      - dependencies
-    groups:
-      # Batch minor/patch bumps into a single PR to reduce noise.
-      minor-and-patch:
-        update-types:
-          - minor
-          - patch
-
-  - package-ecosystem: npm
-    directory: "/mcp-server"
-    schedule:
-      interval: weekly
-    open-pull-requests-limit: 5
-    labels:
-      - dependencies
-
-  # Keep GitHub Actions pinned versions up to date.
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
