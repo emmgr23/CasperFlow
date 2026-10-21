@@ -11,7 +11,7 @@
   "dependencies": {
     "@casper-ecosystem/casper-eip-712": "^1.2.0",
     "@make-software/cspr-trade-mcp-sdk": "^0.6.0",
-    "@noble/curves": "^1.9.0",
+    "@noble/curves": "^2.2.0",
     "@noble/hashes": "^1.8.0",
     "@scure/bip39": "^1.6.0",
     "@xyflow/react": "^12.3.0",
